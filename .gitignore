@@ -6,3 +6,4 @@ RCam.xcodeproj/
 Configs/Version.xcconfig
 *.xcuserdata/
 *.xcuserdatad/
+.testrig/

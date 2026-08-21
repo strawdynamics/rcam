@@ -1,0 +1,14 @@
+prefix=/Users/paulstraw/dev/rcam/vendor/ffmpeg
+exec_prefix=${prefix}
+libdir=/Users/paulstraw/dev/rcam/vendor/ffmpeg/lib
+includedir=/Users/paulstraw/dev/rcam/vendor/ffmpeg/include
+
+Name: libavfilter
+Description: FFmpeg audio/video filtering library
+Version: 10.4.100
+Requires: libavutil >= 59.39.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavfilter -pthread -lm
+Libs.private: 
+Cflags: -I${includedir}
