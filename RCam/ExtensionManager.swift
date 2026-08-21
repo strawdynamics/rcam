@@ -1,0 +1,59 @@
+import Foundation
+import SystemExtensions
+import os.log
+
+/// Submits activation requests for the CMIO extension and reports progress.
+final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionRequestDelegate {
+    static let extensionIdentifier = "com.paulstraw.rcam.extension"
+
+    @Published var status = "not installed"
+
+    private let log = Logger(subsystem: "com.paulstraw.rcam", category: "ExtensionManager")
+
+    func activate() {
+        let request = OSSystemExtensionRequest.activationRequest(
+            forExtensionWithIdentifier: Self.extensionIdentifier,
+            queue: .main
+        )
+        request.delegate = self
+        OSSystemExtensionManager.shared.submitRequest(request)
+        status = "activation requested…"
+        log.info("Submitted activation request for \(Self.extensionIdentifier, privacy: .public)")
+    }
+
+    // MARK: - OSSystemExtensionRequestDelegate
+
+    func request(
+        _ request: OSSystemExtensionRequest,
+        actionForReplacingExtension existing: OSSystemExtensionProperties,
+        withExtension ext: OSSystemExtensionProperties
+    ) -> OSSystemExtensionRequest.ReplacementAction {
+        log.info("Replacing extension \(existing.bundleVersion, privacy: .public) with \(ext.bundleVersion, privacy: .public)")
+        return .replace
+    }
+
+    func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
+        status = "needs approval in System Settings → Privacy & Security"
+        log.info("Activation needs user approval")
+    }
+
+    func request(
+        _ request: OSSystemExtensionRequest,
+        didFinishWithResult result: OSSystemExtensionRequest.Result
+    ) {
+        switch result {
+        case .completed:
+            status = "activated"
+        case .willCompleteAfterReboot:
+            status = "will activate after reboot"
+        @unknown default:
+            status = "finished (result \(result.rawValue))"
+        }
+        log.info("Activation finished with result \(result.rawValue)")
+    }
+
+    func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
+        status = "failed: \(error.localizedDescription)"
+        log.error("Activation failed: \(error.localizedDescription, privacy: .public)")
+    }
+}
