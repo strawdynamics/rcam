@@ -137,7 +137,11 @@ struct CameraEditor: View {
                             .frame(width: 192, height: 108)
                             .border(Color.secondary)
                     case .error(let message):
-                        Text(message).foregroundStyle(.red)
+                        Text(message)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
