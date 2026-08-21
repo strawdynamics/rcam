@@ -55,12 +55,18 @@ targets:
       path: RCamExtension/RCamExtension.entitlements
       properties:
         com.apple.security.app-sandbox: true
+        # Required by the CMIO category validator: CMIOExtensionMachServiceName
+        # must descend from an app group in the extension's entitlements
+        # (verified against sysextd log + OBS's shipping extension).
+        com.apple.security.application-groups:
+          - TK7EDP5B95.com.paulstraw.rcam
     info:
       path: RCamExtension/Info.plist
       properties:
         CFBundlePackageType: SYSX
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
+        NSSystemExtensionUsageDescription: RCam provides the "RTSP Camera" virtual camera device.
         CMIOExtension:
           CMIOExtensionMachServiceName: $(TeamIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)
 
@@ -71,6 +77,11 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam.cli
+        # Embed an Info.plist section so TCC can attribute the camera-access
+        # request to this binary (required for probe-device).
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        INFOPLIST_KEY_NSCameraUsageDescription: rcamcli captures frames from the RCam virtual camera for testing.
 
 schemes:
   RCam:

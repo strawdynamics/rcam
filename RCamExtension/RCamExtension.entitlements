@@ -4,5 +4,9 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>TK7EDP5B95.com.paulstraw.rcam</string>
+	</array>
 </dict>
 </plist>

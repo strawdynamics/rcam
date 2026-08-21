@@ -1,16 +1,35 @@
 import Foundation
 
-// Dev/test CLI for RCam. Real commands (probe-device, capture) land in M1/M2.
+// Dev/test CLI for RCam. `capture` (RTSP decode harness) lands in M2.
 @main
 struct CLIMain {
     static func main() {
-        let args = Array(CommandLine.arguments.dropFirst())
+        var args = Array(CommandLine.arguments.dropFirst())
         guard let command = args.first else {
-            print("usage: rcamcli <command>")
-            print("commands: (none yet — probe-device arrives in M1, capture in M2)")
+            usage()
             exit(64)
         }
-        print("rcamcli: unknown command '\(command)'")
-        exit(64)
+        args.removeFirst()
+
+        switch command {
+        case "probe-device":
+            var frames = 30
+            if let index = args.firstIndex(of: "--frames"), index + 1 < args.count,
+               let value = Int(args[index + 1]) {
+                frames = value
+            }
+            exit(ProbeDevice.run(frameTarget: frames))
+        default:
+            print("rcamcli: unknown command '\(command)'")
+            usage()
+            exit(64)
+        }
+    }
+
+    static func usage() {
+        print("""
+        usage: rcamcli <command>
+          probe-device [--frames N]   assert "RTSP Camera" exists and animates (default 30 frames)
+        """)
     }
 }
