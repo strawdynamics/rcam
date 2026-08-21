@@ -26,7 +26,7 @@ struct RCamApp: App {
                         HStack {
                             Image(systemName: camera.id == config.selectedID
                                   ? "checkmark.circle.fill" : "circle")
-                            Text(camera.name)
+                            Text(camera.name.isEmpty ? "Untitled" : camera.name)
                         }
                     }
                 }

@@ -16,6 +16,8 @@ final class RCamController: ObservableObject {
     static let selectNotification = Notification.Name("com.paulstraw.rcam.selectCamera")
 
     @Published var statusText = "starting…"
+    /// The camera currently delivering frames to the virtual device, if any.
+    @Published private(set) var streamingCameraID: UUID?
 
     let config = ConfigStore()
 
@@ -196,6 +198,7 @@ final class RCamController: ObservableObject {
         }
         sinkWriter.stop()
         setSwitching(false)
+        streamingCameraID = nil
         unwatchedSince = nil
         backoffSeconds = 1
         nextReconnectAllowed = .distantPast
@@ -267,9 +270,13 @@ final class RCamController: ObservableObject {
                     self.statusText = "connecting to \(camera.name)…"
                 case .streaming:
                     self.statusText = "streaming \(camera.name)"
+                    self.streamingCameraID = camera.id
                     self.backoffSeconds = 1
                 case .failed(let message):
                     self.statusText = "\(camera.name): \(message)"
+                    if self.streamingCameraID == camera.id {
+                        self.streamingCameraID = nil
+                    }
                     if let source {
                         self.handleSourceFailure(source, camera: camera)
                     }

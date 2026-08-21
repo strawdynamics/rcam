@@ -28,12 +28,18 @@ final class ConfigStore: ObservableObject {
         didSet { UserDefaults.standard.set(selectedID?.uuidString, forKey: "selectedCameraID") }
     }
 
-    private static var fileURL: URL {
+    /// Application Support directory holding the config (and, from the
+    /// user's point of view, "where RCam keeps its files").
+    static var directoryURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory,
                                             in: .userDomainMask)[0]
         let dir = base.appendingPathComponent("RCam", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("cameras.json")
+        return dir
+    }
+
+    private static var fileURL: URL {
+        directoryURL.appendingPathComponent("cameras.json")
     }
 
     init() {
@@ -105,6 +111,24 @@ enum KeychainStore {
             return nil
         }
         return creds
+    }
+
+    /// When the credentials item was last written, from the Keychain's own
+    /// modification-date attribute.
+    static func savedAt(cameraID: UUID) -> Date? {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: cameraID.uuidString,
+            kSecReturnAttributes: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let attrs = result as? [CFString: Any] else {
+            return nil
+        }
+        return attrs[kSecAttrModificationDate] as? Date
     }
 
     @discardableResult
