@@ -7,3 +7,4 @@ Configs/Version.xcconfig
 *.xcuserdata/
 *.xcuserdatad/
 .testrig/
+.claude/scheduled_tasks.lock
