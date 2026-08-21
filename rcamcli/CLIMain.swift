@@ -18,7 +18,7 @@ struct CLIMain {
                let value = Int(args[index + 1]) {
                 frames = value
             }
-            exit(ProbeDevice.run(frameTarget: frames))
+            exit(ProbeDevice.run(frameTarget: frames, dumpLuma: args.contains("--dump-luma")))
         case "capture":
             guard let url = args.first else {
                 usage()
@@ -35,6 +35,19 @@ struct CLIMain {
                 outDir = args[index + 1]
             }
             exit(CaptureCommand.run(url: url, seconds: seconds, outDir: outDir))
+        case "cmio-props":
+            let uid = "7E5F9C1A-3B2D-4E6F-8A90-C1D2E3F4A5B6"
+            guard let device = CMIOHelpers.findDevice(uid: uid) else {
+                print("device NOT found (uid \(uid))")
+                exit(1)
+            }
+            print("device found: id \(device)")
+            print("rwch (watched) = \(CMIOHelpers.readCustomString(device: device, code: "rwch") ?? "<no property>")")
+            print("rnam (name)    = \(CMIOHelpers.readCustomString(device: device, code: "rnam") ?? "<no property>")")
+            let wrote = CMIOHelpers.writeCustomString(device: device, code: "rnam", value: "cli-test")
+            print("rnam write     = \(wrote ? "ok" : "FAILED")")
+            print("rnam readback  = \(CMIOHelpers.readCustomString(device: device, code: "rnam") ?? "<no property>")")
+            exit(0)
         default:
             print("rcamcli: unknown command '\(command)'")
             usage()

@@ -38,10 +38,13 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.developer.system-extension.install: true
+        # Sandboxed access to CMIO devices (needed to write the sink stream).
+        com.apple.security.device.camera: true
     info:
       path: RCam/Info.plist
       properties:
         LSUIElement: true
+        NSCameraUsageDescription: RCam pushes video into its own virtual camera device.
         CFBundleDisplayName: RCam
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)

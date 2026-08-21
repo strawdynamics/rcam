@@ -22,5 +22,7 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>RCam pushes video into its own virtual camera device.</string>
 </dict>
 </plist>

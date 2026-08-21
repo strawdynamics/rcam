@@ -129,11 +129,11 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 ### M3 — Wire app → sink → source
 
-- [ ] App-side sink writer: locate the device + sink stream via CoreMediaIO C API, `CMIOStreamCopyBufferQueue`, enqueue decoded frames as `CMSampleBuffer`s, start/stop the sink stream.
-- [ ] Extension: consume sink queue; fresh sink frames take priority slot 1 in the emit loop; detect sink-stale (>1s) and fall back per the priority chain.
-- [ ] Custom CMIO properties on the device: `sourceIsWatched` (extension → app: source-stream client count > 0), `activeCameraName` (app → extension, for the "No signal" placeholder). App polls watched-state ~1s.
-- [ ] Decode-only-when-watched: app connects `RTSPSource` when watched, disconnects after 10s grace when unwatched. Hardcode the test-rig URL as the "camera" for this milestone (real config UI is M4).
-- [ ] Placeholder text switches to "Open RCam to select a source" when no sink client (replaces color bars; keep bars behind a debug flag).
+- [x] App-side sink writer: locate the device + sink stream via CoreMediaIO C API, `CMIOStreamCopyBufferQueue`, enqueue decoded frames as `CMSampleBuffer`s, start/stop the sink stream.
+- [x] Extension: consume sink queue; fresh sink frames take priority slot 1 in the emit loop; detect sink-stale (>1s) and fall back per the priority chain.
+- [x] Custom CMIO properties on the device: `sourceIsWatched` (extension → app: source-stream client count > 0), `activeCameraName` (app → extension, for the "No signal" placeholder). App polls watched-state ~1s.
+- [x] Decode-only-when-watched: app connects `RTSPSource` when watched, disconnects after 10s grace when unwatched. Hardcode the test-rig URL as the "camera" for this milestone (real config UI is M4).
+- [x] Placeholder text switches to "Open RCam to select a source" when no sink client (replaces color bars; keep bars behind a debug flag).
 
 **Verify (automated)**: testrig up, RCam running from `/Applications`; `rcamcli probe-device --capture` frames now show the testrig's moving counter (inter-frame difference + not the placeholder); kill RCam mid-capture → captured frames keep flowing (placeholder takes over, no stall — assert continuous frame delivery and no `AVCaptureSession` error); check via logs that RTSP disconnects ~10s after capture stops. Commit.
 
@@ -172,13 +172,30 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 ## State
 
-**Current milestone**: M3 (M0–M2 complete; Gate 1 cleared)
+**Current milestone**: M4 — ⛔ **HUMAN GATE 2 pending** (M3 complete and verified)
+
+### HUMAN GATE 2 — manual steps for the user
+
+The test rig was left running deliberately (restart anytime with `scripts/testrig.sh start`). RCam is running from /Applications. Camera permission for RCam itself was granted during M3 (the app needs it to see its own virtual device — see Iteration Log).
+
+1. Open QuickTime → File → New Movie Recording → pick "RTSP Camera". Within ~2s you should see the mediamtx test pattern (color bars + running clock). That is the live RTSP feed flowing app → sink → extension.
+2. Ideally also try a real call (Zoom/Meet/FaceTime) with "RTSP Camera" selected.
+3. While the feed is up, Quit RCam from the menu bar icon. The feed must switch to the "Open RCam to select a source" placeholder without freezing the call/QuickTime.
+4. Reopen /Applications/RCam.app — the live feed should return within a few seconds.
+5. Resume the loop: `/loop Read LOOP.md, then execute one iteration per its Loop Protocol.` (next: M4 — config UI, multi-camera, switching)
+
+Diagnostics if needed:
+- App: `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info`
+- Extension: `log stream --predicate 'subsystem == "com.paulstraw.rcam.extension"' --info`
+- If the device disappears after a rebuild (extension replacement race): quit RCam, run `scripts/build.sh`, reopen RCam — a fresh version bump re-registers it.
 
 **Blockers**: none
 
 ### Iteration Log
 
 (append one line per iteration)
+
+- 2026-08-20 M3: Full sink wiring works end-to-end. SinkWriter (CMIO C API, streams found by name), extension consume loop + custom props rwch/rnam (string-valued, 4cc_XXXX_glob_0000), decode-only-when-watched w/ 10s grace (log-verified exact), placeholder chain incl. "No signal — <name>" during reconnect. Verified: probe shows placeholder→live testrig transition; kill RCam mid-capture → 240/240 frames no stall; grace disconnect at exactly +10s. Two hard-won facts: (1) extension replacement can race launchd ("Submit job failed: Operation already in progress" → service removed, device gone) — remedy: quit app, rebuild (new CFBundleVersion), relaunch; kickstarting com.apple.cmio.LaunchCMIOUserExtensionsAgent did NOT help. (2) The DAL hides camera devices from apps without camera TCC — the container app itself needs NSCameraUsageDescription + com.apple.security.device.camera + AVCaptureDevice.requestAccess, else it cannot see its own virtual device (first poll transiently sees it, then it vanishes). Stopped at HUMAN GATE 2.
 
 - 2026-08-20 M2 (part 2): RTSPSource (libavformat→VTDecompression→VTPixelTransfer letterbox), FrameSource FROZEN, rcamcli capture. FFmpeg minimal-build fix: hevc parser added solely for aom_film_grain.o (h264's h2645_sei refs it). Testrig sub path changed 640x360→640x480 (360 is already 16:9, no bars to test). Verify: both paths 4 PNGs each 1280x720, animating (diff 5.7–8.1), pillarbox bars Y=16 vs center 125, ~30fps steady, first frame ≤1.5s. Testrig sub is 4:3 → bars are left/right, not top/bottom as M2 verify text assumed.
 - 2026-08-20 M2 (part 1): Gate 1 cleared by user. build-ffmpeg.sh (7.1.1 static demux-only, arm64, 11MB libs committed to vendor/ffmpeg) + testrig.sh (mediamtx, testsrc→h264 720p30 + 360p30, idempotent start/stop verified via ffprobe). Next: RTSPSource + FrameSource + rcamcli capture.
