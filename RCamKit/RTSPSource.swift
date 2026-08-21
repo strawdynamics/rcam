@@ -8,8 +8,20 @@ import VideoToolbox
 /// VTDecompressionSession (hardware decode) → VTPixelTransferSession
 /// (scale + letterbox to 1280x720 NV12).
 public final class RTSPSource: FrameSource {
+    /// Native properties of the connected stream, as reported by the demuxer
+    /// (before any scaling to the 720p output format).
+    public struct StreamInfo: Equatable {
+        public let width: Int
+        public let height: Int
+        public let codec: String
+        public let frameRate: Double?
+    }
+
     public var onFrame: ((CVPixelBuffer, TimeInterval) -> Void)?
     public var onStateChange: ((FrameSourceState) -> Void)?
+    /// Fires once per connection, after stream info is probed — including for
+    /// streams that then fail the codec check.
+    public var onStreamInfo: ((StreamInfo) -> Void)?
 
     private let url: String
     private let fill: Bool
@@ -117,6 +129,17 @@ public final class RTSPSource: FrameSource {
             return
         }
         let codecParameters = stream.pointee.codecpar!
+
+        let avgFrameRate = stream.pointee.avg_frame_rate
+        let frameRate: Double? = avgFrameRate.num > 0 && avgFrameRate.den > 0
+            ? Double(avgFrameRate.num) / Double(avgFrameRate.den) : nil
+        onStreamInfo?(StreamInfo(
+            width: Int(codecParameters.pointee.width),
+            height: Int(codecParameters.pointee.height),
+            codec: String(cString: avcodec_get_name(codecParameters.pointee.codec_id)),
+            frameRate: frameRate
+        ))
+
         guard codecParameters.pointee.codec_id == AV_CODEC_ID_H264 else {
             onStateChange?(.failed("unsupported codec (only H.264 in v1)"))
             return

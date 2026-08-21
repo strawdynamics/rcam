@@ -68,7 +68,12 @@ final class ConfigStore: ObservableObject {
     /// Keychain credentials injected in memory only.
     static func resolvedURL(for camera: CameraConfig) -> String {
         let base = (camera.preferSub && !camera.subURL.isEmpty) ? camera.subURL : camera.mainURL
-        guard let creds = KeychainStore.read(cameraID: camera.id),
+        return resolvedURL(base, cameraID: camera.id)
+    }
+
+    /// A specific URL with that camera's Keychain credentials injected.
+    static func resolvedURL(_ base: String, cameraID: UUID) -> String {
+        guard let creds = KeychainStore.read(cameraID: cameraID),
               var components = URLComponents(string: base) else { return base }
         components.user = creds.username
         components.password = creds.password
