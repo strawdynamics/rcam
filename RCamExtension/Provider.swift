@@ -59,12 +59,20 @@ final class RCamProviderSource: NSObject, CMIOExtensionProviderSource {
 // MARK: - Device (owns the single 30Hz clock)
 
 final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
+    // Custom properties (device scope). Format: 4cc_<fourcc>_glob_0000.
+    // Both are strings: watched is "0"/"1" so the app-side read path is uniform.
+    static let watchedProperty = CMIOExtensionProperty(rawValue: "4cc_rwch_glob_0000")
+    static let cameraNameProperty = CMIOExtensionProperty(rawValue: "4cc_rnam_glob_0000")
+
     private(set) var device: CMIOExtensionDevice!
     private var sourceStreamSource: RCamSourceStreamSource!
     private var sinkStreamSource: RCamSinkStreamSource!
 
     private let stateLock = NSLock()
     private var streamingCounter = 0
+    private var sinkConnected = false
+    private var activeCameraName = ""
+    private let debugBars = ProcessInfo.processInfo.environment["RCAM_TEST_BARS"] != nil
 
     private let timerQueue = DispatchQueue(label: "com.paulstraw.rcam.extension.emit",
                                            qos: .userInteractive)
@@ -81,7 +89,9 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private var pendingSinkFrame: CVPixelBuffer?
     private var lastGoodFrame: CVPixelBuffer?
     private var lastSinkArrival: CFTimeInterval = 0
-    private let sinkStaleThreshold: CFTimeInterval = 1.0
+    /// How long to re-emit the last-good frame during a sink stall before
+    /// declaring the stream dead ("No signal" placeholder).
+    private let sinkStaleThreshold: CFTimeInterval = 3.0
 
     init(localizedName: String) {
         super.init()
@@ -133,7 +143,7 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
     }
 
     var availableProperties: Set<CMIOExtensionProperty> {
-        [.deviceTransportType, .deviceModel]
+        [.deviceTransportType, .deviceModel, Self.watchedProperty, Self.cameraNameProperty]
     }
 
     func deviceProperties(
@@ -147,44 +157,76 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
         if properties.contains(.deviceModel) {
             deviceProperties.model = "RCam Virtual Camera"
         }
+        stateLock.lock()
+        let watched = streamingCounter > 0
+        let name = activeCameraName
+        stateLock.unlock()
+        if properties.contains(Self.watchedProperty) {
+            deviceProperties.setPropertyState(
+                CMIOExtensionPropertyState(value: (watched ? "1" : "0") as NSString),
+                forProperty: Self.watchedProperty
+            )
+        }
+        if properties.contains(Self.cameraNameProperty) {
+            deviceProperties.setPropertyState(
+                CMIOExtensionPropertyState(value: name as NSString),
+                forProperty: Self.cameraNameProperty
+            )
+        }
         return deviceProperties
     }
 
     func setDeviceProperties(_ deviceProperties: CMIOExtensionDeviceProperties) throws {
-        // No settable device properties.
+        if let state = deviceProperties.propertiesDictionary[Self.cameraNameProperty],
+           let name = state.value as? String {
+            stateLock.lock()
+            activeCameraName = name
+            stateLock.unlock()
+            extensionLog.info("activeCameraName set to \(name, privacy: .public)")
+        }
+    }
+
+    private func notifyWatchedChanged() {
+        stateLock.lock()
+        let watched = streamingCounter > 0
+        stateLock.unlock()
+        let state = CMIOExtensionPropertyState<AnyObject>(value: (watched ? "1" : "0") as NSString)
+        device.notifyPropertiesChanged([Self.watchedProperty: state])
     }
 
     // MARK: 30Hz emit loop
 
     func startStreaming() {
         stateLock.lock()
-        defer { stateLock.unlock() }
         streamingCounter += 1
         extensionLog.info("startStreaming — clients now \(self.streamingCounter)")
-        guard timer == nil else { return }
-
-        baseHostTime = CMClockGetTime(CMClockGetHostTimeClock())
-        frameIndex = 0
-        let newTimer = DispatchSource.makeTimerSource(flags: .strict, queue: timerQueue)
-        newTimer.schedule(deadline: .now(),
-                          repeating: 1.0 / Double(kFrameRate),
-                          leeway: .milliseconds(2))
-        newTimer.setEventHandler { [weak self] in
-            self?.emitFrame()
+        if timer == nil {
+            baseHostTime = CMClockGetTime(CMClockGetHostTimeClock())
+            frameIndex = 0
+            let newTimer = DispatchSource.makeTimerSource(flags: .strict, queue: timerQueue)
+            newTimer.schedule(deadline: .now(),
+                              repeating: 1.0 / Double(kFrameRate),
+                              leeway: .milliseconds(2))
+            newTimer.setEventHandler { [weak self] in
+                self?.emitFrame()
+            }
+            timer = newTimer
+            newTimer.resume()
         }
-        timer = newTimer
-        newTimer.resume()
+        stateLock.unlock()
+        notifyWatchedChanged()
     }
 
     func stopStreaming() {
         stateLock.lock()
-        defer { stateLock.unlock() }
         streamingCounter = max(0, streamingCounter - 1)
         extensionLog.info("stopStreaming — clients now \(self.streamingCounter)")
         if streamingCounter == 0, let activeTimer = timer {
             activeTimer.cancel()
             timer = nil
         }
+        stateLock.unlock()
+        notifyWatchedChanged()
     }
 
     /// One tick: emit exactly one frame. Priority: fresh sink frame → last-good
@@ -235,26 +277,48 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
         pendingSinkFrame = nil
         let lastGood = lastGoodFrame
         let sinkAge = monotonicNow() - lastSinkArrival
+        let connected = sinkConnected
+        let name = activeCameraName
         stateLock.unlock()
 
         if let fresh {
             return fresh
         }
-        if let lastGood, sinkAge < sinkStaleThreshold {
-            return lastGood
+        if connected {
+            // RTSP stalls are normal — hold the last-good frame while merely
+            // stale, drop to "No signal" only when the stream looks dead.
+            if let lastGood, sinkAge < sinkStaleThreshold {
+                return lastGood
+            }
+            let label = name.isEmpty ? "camera" : name
+            return PlaceholderRenderer.textFrame(lines: ["No signal — \(label)"])
         }
-        // M1: animated test pattern is the placeholder; the "Open RCam…" text
-        // frame replaces it in M3 (bars stay behind a debug flag).
-        return testPattern.nextFrame()
+        if debugBars {
+            return testPattern.nextFrame()
+        }
+        return PlaceholderRenderer.textFrame(lines: ["Open RCam to select a source"])
     }
 
-    /// Sink stream hands decoded frames in here (wired up in M3).
+    /// Sink stream hands decoded frames in here.
     func sinkFrameArrived(_ pixelBuffer: CVPixelBuffer) {
         stateLock.lock()
         pendingSinkFrame = pixelBuffer
         lastGoodFrame = pixelBuffer
         lastSinkArrival = monotonicNow()
         stateLock.unlock()
+    }
+
+    func setSinkConnected(_ connected: Bool) {
+        stateLock.lock()
+        sinkConnected = connected
+        if !connected {
+            // Client is gone — fall straight to the placeholder, don't replay
+            // its stale frames.
+            pendingSinkFrame = nil
+            lastGoodFrame = nil
+        }
+        stateLock.unlock()
+        extensionLog.info("sinkConnected = \(connected)")
     }
 
     private func monotonicNow() -> CFTimeInterval {
@@ -345,6 +409,8 @@ final class RCamSinkStreamSource: NSObject, CMIOExtensionStreamSource {
     private(set) var stream: CMIOExtensionStream!
     let device: CMIOExtensionDevice
     private let streamFormat: CMIOExtensionStreamFormat
+    private var client: CMIOExtensionClient?
+    private var sinkStarted = false
 
     init(
         localizedName: String,
@@ -393,14 +459,40 @@ final class RCamSinkStreamSource: NSObject, CMIOExtensionStreamSource {
     }
 
     func authorizedToStartStream(for client: CMIOExtensionClient) -> Bool {
-        true
+        self.client = client
+        return true
     }
 
     func startStream() throws {
-        extensionLog.info("Sink stream started (consumption wired in M3)")
+        extensionLog.info("Sink stream started")
+        sinkStarted = true
+        deviceSource?.setSinkConnected(true)
+        consumeNext()
     }
 
     func stopStream() throws {
         extensionLog.info("Sink stream stopped")
+        sinkStarted = false
+        deviceSource?.setSinkConnected(false)
+    }
+
+    private var deviceSource: RCamDeviceSource? {
+        device.source as? RCamDeviceSource
+    }
+
+    private func consumeNext() {
+        guard sinkStarted, let client else { return }
+        stream.consumeSampleBuffer(from: client) { [weak self] sampleBuffer, _, _, _, error in
+            guard let self else { return }
+            if let sampleBuffer, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+                self.deviceSource?.sinkFrameArrived(pixelBuffer)
+            }
+            if let error {
+                extensionLog.error("consumeSampleBuffer: \(error.localizedDescription, privacy: .public)")
+            }
+            if self.sinkStarted {
+                self.consumeNext()
+            }
+        }
     }
 }

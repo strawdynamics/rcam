@@ -7,7 +7,7 @@ import CoreVideo
 enum ProbeDevice {
     static let deviceName = "RTSP Camera"
 
-    static func run(frameTarget: Int) -> Int32 {
+    static func run(frameTarget: Int, dumpLuma: Bool = false) -> Int32 {
         guard requestCameraAccess() else {
             fputs("FAIL: camera access denied (grant access in System Settings → Privacy & Security → Camera)\n", stderr)
             return 2
@@ -57,6 +57,11 @@ enum ProbeDevice {
         guard done else {
             fputs("FAIL: timed out after collecting \(collector.stats.count) of \(frameTarget) frames\n", stderr)
             return 2
+        }
+        if dumpLuma {
+            for (index, stat) in collector.stats.enumerated() {
+                print(String(format: "luma[%d]=%.1f", index, stat.luma))
+            }
         }
         return assess(stats: collector.stats, frameTarget: frameTarget)
     }
