@@ -108,6 +108,20 @@ struct CameraEditor: View {
     }
 
     var body: some View {
+        ScrollView {
+            editorForm
+        }
+        .onAppear {
+            guard !credsLoaded else { return }
+            credsLoaded = true
+            if let creds = KeychainStore.read(cameraID: config.cameras[index].id) {
+                username = creds.username
+                password = creds.password
+            }
+        }
+    }
+
+    private var editorForm: some View {
         Form {
             TextField("Name", text: $config.cameras[index].name)
             TextField("Main URL (rtsp://…)", text: $config.cameras[index].mainURL)
@@ -143,14 +157,6 @@ struct CameraEditor: View {
             }
         }
         .padding()
-        .onAppear {
-            guard !credsLoaded else { return }
-            credsLoaded = true
-            if let creds = KeychainStore.read(cameraID: config.cameras[index].id) {
-                username = creds.username
-                password = creds.password
-            }
-        }
     }
 
     private var hasSubstream: Bool {
