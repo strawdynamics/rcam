@@ -8,3 +8,4 @@ Configs/Version.xcconfig
 *.xcuserdatad/
 .testrig/
 .claude/scheduled_tasks.lock
+*.blend1
