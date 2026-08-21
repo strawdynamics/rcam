@@ -51,7 +51,7 @@ enum ProbeDevice {
         session.addOutput(output)
 
         session.startRunning()
-        let done = collector.wait(timeout: .now() + 15)
+        let done = collector.wait(timeout: .now() + .seconds(15 + frameTarget / 30))
         session.stopRunning()
 
         guard done else {
@@ -60,7 +60,7 @@ enum ProbeDevice {
         }
         if dumpLuma {
             for (index, stat) in collector.stats.enumerated() {
-                print(String(format: "luma[%d]=%.1f", index, stat.luma))
+                print(String(format: "luma[%d]=%.1f t=%.3f", index, stat.luma, stat.arrival))
             }
         }
         return assess(stats: collector.stats, frameTarget: frameTarget)
@@ -118,6 +118,7 @@ struct FrameStat {
     let width: Int
     let height: Int
     let luma: Double // mean of sampled Y-plane pixels
+    let arrival: TimeInterval // epoch seconds
 }
 
 final class FrameCollector: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -157,7 +158,8 @@ final class FrameCollector: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly)
 
         stats.append(FrameStat(width: width, height: height,
-                               luma: samples > 0 ? sum / Double(samples) : 0))
+                               luma: samples > 0 ? sum / Double(samples) : 0,
+                               arrival: Date().timeIntervalSince1970))
         if stats.count >= target {
             semaphore.signal()
         }

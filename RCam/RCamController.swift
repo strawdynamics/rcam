@@ -1,7 +1,9 @@
+import AppKit
 import AVFoundation
 import Foundation
 import CoreMediaIO
 import CoreVideo
+import ServiceManagement
 import os.log
 
 /// Multi-camera controller. Polls the extension's `watched` property (~1s),
@@ -26,6 +28,11 @@ final class RCamController: ObservableObject {
     private var unwatchedSince: Date?
     private var lastPollDiagnostic = ""
     private let teardownQueue = DispatchQueue(label: "com.paulstraw.rcam.teardown")
+
+    // Reconnect backoff (1s → 2s → 4s … capped at 30s), driven by the 1s poll.
+    private var backoffSeconds: TimeInterval = 1
+    private var nextReconnectAllowed = Date.distantPast
+    private var asleep = false
 
     func start() {
         // Without camera authorization the DAL hides camera devices from this
@@ -61,6 +68,50 @@ final class RCamController: ObservableObject {
                 self.log.error("selectCamera notification for unknown camera \(key, privacy: .public)")
             }
         }
+
+        // Test hook for launch-at-login (the Settings toggle uses the same call).
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.paulstraw.rcam.setLaunchAtLogin"),
+            object: nil, queue: .main
+        ) { [weak self] note in
+            self?.setLaunchAtLogin((note.object as? String) == "1")
+        }
+
+        // Sleep/wake: tear down before sleep; reconnect immediately on wake
+        // rather than waiting out dead TCP connections.
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(forName: NSWorkspace.willSleepNotification,
+                              object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.log.info("system will sleep — tearing down")
+            self.asleep = true
+            self.disconnect()
+        }
+        workspace.addObserver(forName: NSWorkspace.didWakeNotification,
+                              object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.log.info("system woke — reconnecting immediately")
+            self.asleep = false
+            self.backoffSeconds = 1
+            self.nextReconnectAllowed = .distantPast
+            self.poll()
+        }
+    }
+
+    @discardableResult
+    func setLaunchAtLogin(_ enabled: Bool) -> Bool {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            log.info("launch-at-login set \(enabled) — status now \(SMAppService.mainApp.status.rawValue)")
+            return true
+        } catch {
+            log.error("launch-at-login change failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     /// User (or scripted) camera selection.
@@ -95,7 +146,7 @@ final class RCamController: ObservableObject {
 
         if watched {
             unwatchedSince = nil
-            if !hasSource {
+            if !hasSource, !asleep, Date() >= nextReconnectAllowed {
                 connectSelected(device: device)
             }
         } else if hasSource {
@@ -146,6 +197,8 @@ final class RCamController: ObservableObject {
         sinkWriter.stop()
         setSwitching(false)
         unwatchedSince = nil
+        backoffSeconds = 1
+        nextReconnectAllowed = .distantPast
         statusText = "idle (no clients)"
     }
 
@@ -204,18 +257,47 @@ final class RCamController: ObservableObject {
                 self.sinkWriter.enqueue(pixelBuffer)
             }
         }
-        source.onStateChange = { [weak self] state in
+        source.onStateChange = { [weak self, weak source] state in
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch state {
-                case .idle: break
-                case .connecting: self.statusText = "connecting to \(camera.name)…"
-                case .streaming: self.statusText = "streaming \(camera.name)"
-                case .failed(let message): self.statusText = "\(camera.name): \(message)"
+                case .idle:
+                    break
+                case .connecting:
+                    self.statusText = "connecting to \(camera.name)…"
+                case .streaming:
+                    self.statusText = "streaming \(camera.name)"
+                    self.backoffSeconds = 1
+                case .failed(let message):
+                    self.statusText = "\(camera.name): \(message)"
+                    if let source {
+                        self.handleSourceFailure(source, camera: camera)
+                    }
                 }
             }
         }
         return source
+    }
+
+    /// A source died (stream stall, camera reboot, network drop). Keep the
+    /// sink attached — the extension shows "No signal — <name>" — and let the
+    /// poll retry with exponential backoff.
+    private func handleSourceFailure(_ source: RTSPSource, camera: CameraConfig) {
+        switchLock.lock()
+        let wasActive = activeSource === source
+        let wasPending = pendingSource === source
+        if wasActive { activeSource = nil }
+        if wasPending { pendingSource = nil }
+        switchLock.unlock()
+        guard wasActive || wasPending else { return }
+
+        teardownQueue.async { source.stop() }
+        if wasPending { setSwitching(false) }
+
+        let delay = backoffSeconds
+        nextReconnectAllowed = Date().addingTimeInterval(delay)
+        backoffSeconds = min(backoffSeconds * 2, 30)
+        log.info("source \(camera.name, privacy: .public) failed — reconnect allowed in \(delay, format: .fixed(precision: 0))s (backoff)")
     }
 
     private func setSwitching(_ on: Bool) {

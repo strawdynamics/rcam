@@ -86,10 +86,14 @@ public final class RTSPSource: FrameSource {
 
         var options: OpaquePointer?
         av_dict_set(&options, "rtsp_transport", "tcp", 0)
-        av_dict_set(&options, "probesize", "500000", 0)
-        av_dict_set(&options, "analyzeduration", "1000000", 0)
+        // Low-latency tuning (M5): RTSP delivers SPS/PPS via the SDP, so tiny
+        // probe windows are safe; TCP transport can't reorder, so no queue.
+        av_dict_set(&options, "probesize", "100000", 0)
+        av_dict_set(&options, "analyzeduration", "200000", 0)
         av_dict_set(&options, "fflags", "nobuffer", 0)
         av_dict_set(&options, "flags", "low_delay", 0)
+        av_dict_set(&options, "reorder_queue_size", "0", 0)
+        av_dict_set(&options, "max_delay", "500000", 0)
         av_dict_set(&options, "timeout", "5000000", 0) // socket I/O timeout, µs
 
         var ret = avformat_open_input(&formatContext, url, nil, &options)

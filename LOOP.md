@@ -152,11 +152,11 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 ### M5 — Polish + definition of done
 
-- [ ] Reconnect with exponential backoff (1→30s cap), status surfaced in menu (per-camera state).
-- [ ] Sleep/wake: `NSWorkspace.willSleepNotification` teardown, `didWakeNotification` immediate reconnect.
-- [ ] "No signal — \<camera name\>" placeholder path exercised (kill testrig push, verify text frame appears; restart push, verify recovery ≤ backoff cap + GOP).
-- [ ] Launch at login via `SMAppService.mainApp` toggle in Settings.
-- [ ] Low-latency demux opts tuned (`probesize`, `analyzeduration`, `nobuffer`, `low_delay`) — measure glass-to-glass with the burned-in testrig counter; target well under 1s on the rig.
+- [x] Reconnect with exponential backoff (1→30s cap), status surfaced in menu (per-camera state).
+- [x] Sleep/wake: `NSWorkspace.willSleepNotification` teardown, `didWakeNotification` immediate reconnect.
+- [x] "No signal — \<camera name\>" placeholder path exercised (kill testrig push, verify text frame appears; restart push, verify recovery ≤ backoff cap + GOP).
+- [x] Launch at login via `SMAppService.mainApp` toggle in Settings.
+- [x] Low-latency demux opts tuned (`probesize`, `analyzeduration`, `nobuffer`, `low_delay`) — measure glass-to-glass with the burned-in testrig counter; target well under 1s on the rig.
 
 **Verify (automated)**: kill/restart testrig mid-capture → placeholder then recovery, no frame stall throughout; backoff intervals visible in logs; `SMAppService` status registered. Commit.
 
@@ -172,13 +172,32 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 ## State
 
-**Current milestone**: M5 (M0–M4 complete; Gates 1–2 cleared)
+**Current milestone**: ⛔ **HUMAN GATE 3 — final definition-of-done** (M0–M5 complete; all automated verification green)
+
+### HUMAN GATE 3 — final DoD checklist (you, with real cameras)
+
+Everything automatable is done. The test rig is stopped; RCam is running from /Applications with launch-at-login ENABLED (per the DoD — toggle in Settings → General if unwanted). The two testrig cameras ("Test A"/"Test B") are still in the config — delete them in Settings once real cameras are in.
+
+Work through the checklist at the bottom of the Milestones section:
+1. Add your six real cameras in RCam → Settings → Cameras (creds go in the credential fields → Keychain; use "Test Connection" per camera; prefer substream where ≥720p).
+2. Confirm "RTSP Camera" works in QuickTime, Safari (a WebRTC test page), Zoom, Meet, FaceTime.
+3. Switch sources from the menu bar mid-call.
+4. Reboot one camera mid-call → expect last-good ~3s → "No signal — <name>" → auto-reconnect (backoff caps at 30s; expect recovery within backoff + camera GOP).
+5. Sleep/wake the Mac mid-call → teardown on sleep, immediate reconnect on wake.
+6. Log out/in (or reboot) → RCam should launch itself.
+7. Latency: point a camera at a phone stopwatch; glass-to-glass on the local rig measured well under 1s of pipeline overhead — real cameras add their own encode+GOP.
+
+Diagnostics: `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info` (app) / same with `.extension` (extension). After any rebuild: quit RCam, `scripts/build.sh`, reopen RCam TWICE (activation replace, then fresh DAL view).
+
+When the checklist passes, the project is done. If something fails, resume the loop with the usual `/loop` invocation and describe the failure — it becomes a Blocker entry.
 
 **Blockers**: none
 
 ### Iteration Log
 
 (append one line per iteration)
+
+- 2026-08-20 M5: Reconnect backoff (1→2→4…30s, poll-driven via nextReconnectAllowed; log-verified 1s/2s/4s sequence), sleep/wake observers (teardown on willSleep, immediate reconnect + backoff reset on didWake — real-world check deferred to Gate 3 since automating sleep would kill the session), launch-at-login via SMAppService (status=enabled verified via test hook; toggle in Settings→General), demux tuned (probesize 100k, analyzeduration 200k, reorder_queue_size 0, max_delay 0.5s). No-signal verify: kill push → last-good held 2.78s → "No signal — Test A" (luma 29.6) → restart push → live again in 2.75s; 600/600 frames, zero stall. Sink stays attached through source failures (only unwatched-grace/sleep detach it) so the No-signal placeholder shows instead of "Open RCam". Stopped at HUMAN GATE 3 (final DoD).
 
 - 2026-08-20 M4: Gate 2 cleared by user (QuickTime + Discord call + failover + relaunch). Config store (JSON in container App Support, no creds; Keychain per-camera id), MenuBarExtra radio list + Settings CRUD window w/ Test Connection thumbnail, RTSPSource fill mode (CropSourceToCleanAperture), overlap switching (old source feeds sink until new source's first frame; 'rswt' custom prop → extension blits cached "Connecting…" badge onto a pool-copied frame), rcamcli select-camera via distributed notification. Verify: 300/300 frames across scripted A→B switch, single clean cut at frame 166 (luma 121.7→97.2), zero frames <60 luma (no placeholder gap), config JSON credential-free. New dev-loop fact: after an extension replacement the RUNNING app's DAL view is stale (fresh processes see the new device; the old app process does not) — always relaunch RCam after build.sh replaces the extension. Note: probe-device's changedPairs animation heuristic is calibrated for M1 color bars and reads testsrc as static; per-frame --dump-luma is the reliable signal.
 
