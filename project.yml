@@ -1,0 +1,83 @@
+name: RCam
+options:
+  bundleIdPrefix: com.paulstraw
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: TK7EDP5B95
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1.0"
+    ARCHS: arm64
+
+configFiles:
+  Debug: Configs/Version.xcconfig
+  Release: Configs/Version.xcconfig
+
+targets:
+  RCam:
+    type: application
+    platform: macOS
+    sources: [RCam]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam
+    entitlements:
+      path: RCam/RCam.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.developer.system-extension.install: true
+    info:
+      path: RCam/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleDisplayName: RCam
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+    dependencies:
+      - target: RCamExtension
+        embed: true
+        codeSign: true
+
+  RCamExtension:
+    type: system-extension
+    platform: macOS
+    sources: [RCamExtension]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam.extension
+        PRODUCT_NAME: com.paulstraw.rcam.extension
+    entitlements:
+      path: RCamExtension/RCamExtension.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+    info:
+      path: RCamExtension/Info.plist
+      properties:
+        CFBundlePackageType: SYSX
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CMIOExtension:
+          CMIOExtensionMachServiceName: $(TeamIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)
+
+  rcamcli:
+    type: tool
+    platform: macOS
+    sources: [rcamcli]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam.cli
+
+schemes:
+  RCam:
+    build:
+      targets:
+        RCam: all
+  rcamcli:
+    build:
+      targets:
+        rcamcli: all
