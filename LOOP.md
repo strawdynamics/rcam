@@ -121,9 +121,9 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
   `--disable-everything --disable-shared --enable-static --disable-programs --disable-doc --disable-autodetect --enable-network --enable-protocol=tcp,rtp,udp --enable-demuxer=rtsp,sdp --enable-parser=h264 --enable-bsf=h264_mp4toannexb,extract_extradata --disable-decoders --disable-encoders --disable-muxers --disable-filters --disable-swscale --disable-swresample --disable-avdevice`
   Install to `vendor/ffmpeg/` (headers + `.a`s: libavformat, libavcodec, libavutil). Commit the script, not the source tree; commit the built artifacts (small, and makes the loop reproducible).
 - [x] `scripts/testrig.sh {start|stop}`: idempotently runs mediamtx + Homebrew-ffmpeg push of `testsrc2=size=1280x720:rate=30` with burned-in frame counter, H.264 `-tune zerolatency -g 30`, at `rtsp://127.0.0.1:8554/test`. Also a second 640×360 path to exercise upscale+letterbox. *(Note: Homebrew ffmpeg 8.0.1 has no drawtext — uses `testsrc`, whose built-in burned-in clock serves as the counter.)*
-- [ ] `RTSPSource` (app framework code, shared with CLI): C-interop wrapper over libavformat — open with TCP transport + low-latency opts, read H.264 packets, annex-B convert, build `CMVideoFormatDescription` from SPS/PPS, feed `VTDecompressionSession`, scale/letterbox via `VTPixelTransferSession` (`kVTPixelTransferPropertyKey_ScalingMode` letterbox) to 1280×720 NV12.
-- [ ] `FrameSource` protocol: `start/stop`, callback delivering `(CVPixelBuffer, arrival: TimeInterval)`, state (connecting/streaming/failed). Freeze it here.
-- [ ] `rcamcli capture <rtsp-url> --seconds N --out <dir>`: writes every 30th decoded frame as PNG + prints fps/latency stats.
+- [x] `RTSPSource` (app framework code, shared with CLI): C-interop wrapper over libavformat — open with TCP transport + low-latency opts, read H.264 packets, annex-B convert, build `CMVideoFormatDescription` from SPS/PPS, feed `VTDecompressionSession`, scale/letterbox via `VTPixelTransferSession` (`kVTPixelTransferPropertyKey_ScalingMode` letterbox) to 1280×720 NV12. *(Lives in `RCamKit/`, compiled into both app and CLI; CFFmpeg modulemap at `RCamKit/CFFmpeg`.)*
+- [x] `FrameSource` protocol: `start/stop`, callback delivering `(CVPixelBuffer, arrival: TimeInterval)`, state (connecting/streaming/failed). Freeze it here. **FROZEN.**
+- [x] `rcamcli capture <rtsp-url> --seconds N --out <dir>`: writes every 30th decoded frame as PNG + prints fps/latency stats.
 
 **Verify (automated)**: `scripts/testrig.sh start`; `rcamcli capture rtsp://127.0.0.1:8554/test --seconds 5` produces ≥4 PNGs, each 1280×720, non-trivial pixel variance, and consecutive frames differ (stream is live, not stuck); same against the 640×360 path with letterbox bars detected (top/bottom rows near-black, center not). `testrig.sh stop`. Commit.
 
@@ -172,7 +172,7 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 ## State
 
-**Current milestone**: M2 (M0–M1 complete; HUMAN GATE 1 cleared 2026-08-20 — extension `[activated enabled]`, QuickTime shows moving bars, `rcamcli probe-device` passed: 30 frames, 1280x720, 21/29 pairs animating)
+**Current milestone**: M3 (M0–M2 complete; Gate 1 cleared)
 
 **Blockers**: none
 
@@ -180,6 +180,7 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 (append one line per iteration)
 
+- 2026-08-20 M2 (part 2): RTSPSource (libavformat→VTDecompression→VTPixelTransfer letterbox), FrameSource FROZEN, rcamcli capture. FFmpeg minimal-build fix: hevc parser added solely for aom_film_grain.o (h264's h2645_sei refs it). Testrig sub path changed 640x360→640x480 (360 is already 16:9, no bars to test). Verify: both paths 4 PNGs each 1280x720, animating (diff 5.7–8.1), pillarbox bars Y=16 vs center 125, ~30fps steady, first frame ≤1.5s. Testrig sub is 4:3 → bars are left/right, not top/bottom as M2 verify text assumed.
 - 2026-08-20 M2 (part 1): Gate 1 cleared by user. build-ffmpeg.sh (7.1.1 static demux-only, arm64, 11MB libs committed to vendor/ffmpeg) + testrig.sh (mediamtx, testsrc→h264 720p30 + 360p30, idempotent start/stop verified via ffprobe). Next: RTSPSource + FrameSource + rcamcli capture.
 - 2026-08-20 M1: Emit loop (30Hz DispatchSourceTimer, PTS = base host time + tick/30), scrolling-bars NV12 test pattern w/ frame counter, cached CG placeholder+digit renderer, sink stream declared, auto-activation on launch, rcamcli probe-device harness. Two activation fixes found via sysextd log: (1) extension Info.plist needs NSSystemExtensionUsageDescription for the cmio category, (2) extension entitlements need team-prefixed app group TK7EDP5B95.com.paulstraw.rcam (mach service name must descend from an app group — locked-decision table corrected). Extension now `[activated waiting for user]` → stopped at HUMAN GATE 1.
 - 2026-08-20 M0: Full scaffold — git init, brew installed xcodegen+mediamtx, project.yml (3 targets, XcodeGen embeds sysext correctly), skeleton app/extension/CLI, scripts/build.sh. Verified: build.sh exit 0; app entitlements (sandbox, network.client, system-extension.install, team TK7EDP5B95); extension embedded at Contents/Library/SystemExtensions with sandbox-only entitlements, CMIOExtensionMachServiceName=TK7EDP5B95.com.paulstraw.rcam.extension, CFBundleVersion epoch-stamped.

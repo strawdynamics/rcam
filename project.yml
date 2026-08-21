@@ -21,10 +21,17 @@ targets:
   RCam:
     type: application
     platform: macOS
-    sources: [RCam]
+    sources:
+      - RCam
+      - path: RCamKit
+        excludes: ["CFFmpeg/**"]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/RCamKit/CFFmpeg
+        HEADER_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/include
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/lib
+        OTHER_LDFLAGS: "-lavformat -lavcodec -lavutil"
     entitlements:
       path: RCam/RCam.entitlements
       properties:
@@ -73,10 +80,17 @@ targets:
   rcamcli:
     type: tool
     platform: macOS
-    sources: [rcamcli]
+    sources:
+      - rcamcli
+      - path: RCamKit
+        excludes: ["CFFmpeg/**"]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam.cli
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/RCamKit/CFFmpeg
+        HEADER_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/include
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/lib
+        OTHER_LDFLAGS: "-lavformat -lavcodec -lavutil"
         # Embed an Info.plist section so TCC can attribute the camera-access
         # request to this binary (required for probe-device).
         GENERATE_INFOPLIST_FILE: YES

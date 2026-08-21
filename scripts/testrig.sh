@@ -2,7 +2,7 @@
 # Local RTSP test rig: mediamtx + two synthetic H.264 pushes (Homebrew ffmpeg,
 # rig only — never ships).
 #   rtsp://127.0.0.1:8554/test      1280x720@30, burned-in frame counter
-#   rtsp://127.0.0.1:8554/test-sub   640x360@30, burned-in frame counter
+#   rtsp://127.0.0.1:8554/test-sub   640x480@30 (4:3 → pillarbox), burned-in frame counter
 # Idempotent: `start` kills any previous rig instance first.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -55,7 +55,7 @@ EOF
     done
     nc -z 127.0.0.1 8554 || { echo "error: mediamtx did not open :8554" >&2; exit 1; }
     push 1280x720 test
-    push 640x360 test-sub
+    push 640x480 test-sub
     sleep 2
     echo "test rig up: rtsp://127.0.0.1:8554/test and /test-sub"
     ;;

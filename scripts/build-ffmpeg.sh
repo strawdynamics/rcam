@@ -33,7 +33,8 @@ cd "$TREE"
   --enable-network \
   --enable-protocol=tcp,rtp,udp \
   --enable-demuxer=rtsp,sdp \
-  --enable-parser=h264 \
+  --enable-parser=h264,hevc \
+  `# hevc parser is only here for aom_film_grain.o: h264's h2645_sei.o refs it but only HEVC_SEI builds it` \
   --enable-bsf=h264_mp4toannexb,extract_extradata \
   --disable-decoders \
   --disable-encoders \

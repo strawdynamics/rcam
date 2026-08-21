@@ -19,6 +19,22 @@ struct CLIMain {
                 frames = value
             }
             exit(ProbeDevice.run(frameTarget: frames))
+        case "capture":
+            guard let url = args.first else {
+                usage()
+                exit(64)
+            }
+            args.removeFirst()
+            var seconds = 5
+            var outDir: String?
+            if let index = args.firstIndex(of: "--seconds"), index + 1 < args.count,
+               let value = Int(args[index + 1]) {
+                seconds = value
+            }
+            if let index = args.firstIndex(of: "--out"), index + 1 < args.count {
+                outDir = args[index + 1]
+            }
+            exit(CaptureCommand.run(url: url, seconds: seconds, outDir: outDir))
         default:
             print("rcamcli: unknown command '\(command)'")
             usage()
@@ -29,7 +45,8 @@ struct CLIMain {
     static func usage() {
         print("""
         usage: rcamcli <command>
-          probe-device [--frames N]   assert "RTSP Camera" exists and animates (default 30 frames)
+          probe-device [--frames N]                       assert "RTSP Camera" exists and animates (default 30)
+          capture <rtsp-url> [--seconds N] [--out <dir>]  decode RTSP, save every 30th frame as PNG
         """)
     }
 }
