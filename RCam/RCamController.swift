@@ -4,22 +4,28 @@ import CoreMediaIO
 import CoreVideo
 import os.log
 
-/// Decode-only-when-watched: polls the extension's `watched` custom property
-/// (~1s), connects the RTSP source while a client is attached, disconnects
-/// after a grace period when the last client leaves.
+/// Multi-camera controller. Polls the extension's `watched` property (~1s),
+/// decodes only the selected camera while a client is attached (10s grace on
+/// disconnect), and performs overlap switching: the old source keeps feeding
+/// the sink (with a "Connecting…" badge signaled to the extension) until the
+/// new source delivers its first frame.
 final class RCamController: ObservableObject {
-    // M3: the test rig is the hardcoded "camera"; real config lands in M4.
-    static let cameraName = "Test Rig"
-    static let cameraURL = "rtsp://127.0.0.1:8554/test"
     static let unwatchedGrace: TimeInterval = 10
+    static let selectNotification = Notification.Name("com.paulstraw.rcam.selectCamera")
 
     @Published var statusText = "starting…"
 
+    let config = ConfigStore()
+
     private let log = Logger(subsystem: "com.paulstraw.rcam", category: "Controller")
     private let sinkWriter = SinkWriter()
-    private var source: RTSPSource?
+    private let switchLock = NSLock()
+    private var activeSource: RTSPSource?      // feeding the sink
+    private var pendingSource: RTSPSource?     // connecting during a switch
     private var pollTimer: Timer?
     private var unwatchedSince: Date?
+    private var lastPollDiagnostic = ""
+    private let teardownQueue = DispatchQueue(label: "com.paulstraw.rcam.teardown")
 
     func start() {
         // Without camera authorization the DAL hides camera devices from this
@@ -40,9 +46,39 @@ final class RCamController: ObservableObject {
                 self.poll()
             }
         }
+
+        // Scripted/test switching: rcamcli posts a distributed notification
+        // with the camera name or id.
+        DistributedNotificationCenter.default().addObserver(
+            forName: Self.selectNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, let key = note.object as? String else { return }
+            if let camera = self.config.cameras.first(where: {
+                $0.id.uuidString == key || $0.name == key
+            }) {
+                self.select(camera)
+            } else {
+                self.log.error("selectCamera notification for unknown camera \(key, privacy: .public)")
+            }
+        }
     }
 
-    private var lastPollDiagnostic = ""
+    /// User (or scripted) camera selection.
+    func select(_ camera: CameraConfig) {
+        guard camera.id != config.selectedID || activeSource == nil else { return }
+        log.info("selecting camera \(camera.name, privacy: .public)")
+        config.selectedID = camera.id
+
+        switchLock.lock()
+        let streamingNow = activeSource != nil
+        switchLock.unlock()
+        if streamingNow {
+            beginSwitch(to: camera)
+        }
+        // Not streaming: the next watched poll connects to the new selection.
+    }
+
+    // MARK: - Watched polling
 
     private func poll() {
         guard let device = CMIOHelpers.findDevice(uid: SinkWriter.deviceUID) else {
@@ -50,16 +86,19 @@ final class RCamController: ObservableObject {
             diagnose("device not found; visible UIDs: \(CMIOHelpers.allDeviceUIDs())")
             return
         }
-        let rawWatched = CMIOHelpers.readCustomString(device: device, code: "rwch")
-        diagnose("device \(device), rwch=\(rawWatched ?? "<missing>")")
-        let watched = rawWatched == "1"
+        let watched = CMIOHelpers.readCustomString(device: device, code: "rwch") == "1"
+        diagnose("device \(device), watched=\(watched)")
+
+        switchLock.lock()
+        let hasSource = activeSource != nil || pendingSource != nil
+        switchLock.unlock()
 
         if watched {
             unwatchedSince = nil
-            if source == nil {
-                connect(device: device)
+            if !hasSource {
+                connectSelected(device: device)
             }
-        } else if source != nil {
+        } else if hasSource {
             if let since = unwatchedSince {
                 if Date().timeIntervalSince(since) > Self.unwatchedGrace {
                     disconnect()
@@ -69,34 +108,119 @@ final class RCamController: ObservableObject {
                 log.info("unwatched — disconnecting in \(Self.unwatchedGrace)s unless a client returns")
             }
         } else {
-            statusText = "idle (no clients)"
+            statusText = config.cameras.isEmpty ? "no cameras configured" : "idle (no clients)"
         }
     }
 
-    private func connect(device: CMIOObjectID) {
-        log.info("watched — attaching sink and connecting RTSP")
+    private func connectSelected(device: CMIOObjectID) {
+        guard let camera = config.selectedCamera else {
+            statusText = "no camera selected"
+            return
+        }
+        log.info("watched — attaching sink, connecting \(camera.name, privacy: .public)")
         guard sinkWriter.start() else {
             statusText = "sink attach failed"
             return
         }
-        CMIOHelpers.writeCustomString(device: device, code: "rnam", value: Self.cameraName)
+        CMIOHelpers.writeCustomString(device: device, code: "rnam", value: camera.name)
 
-        let source = RTSPSource(url: Self.cameraURL)
-        source.onFrame = { [weak self] pixelBuffer, _ in
-            self?.sinkWriter.enqueue(pixelBuffer)
+        let source = makeSource(for: camera, isPending: false)
+        switchLock.lock()
+        activeSource = source
+        switchLock.unlock()
+        source.start()
+    }
+
+    private func disconnect() {
+        log.info("unwatched for \(Self.unwatchedGrace)s — disconnecting RTSP")
+        switchLock.lock()
+        let oldActive = activeSource
+        let oldPending = pendingSource
+        activeSource = nil
+        pendingSource = nil
+        switchLock.unlock()
+        teardownQueue.async {
+            oldActive?.stop()
+            oldPending?.stop()
+        }
+        sinkWriter.stop()
+        setSwitching(false)
+        unwatchedSince = nil
+        statusText = "idle (no clients)"
+    }
+
+    // MARK: - Overlap switching
+
+    private func beginSwitch(to camera: CameraConfig) {
+        log.info("switching to \(camera.name, privacy: .public) — overlap until first frame")
+        setSwitching(true)
+        if let device = CMIOHelpers.findDevice(uid: SinkWriter.deviceUID) {
+            CMIOHelpers.writeCustomString(device: device, code: "rnam", value: camera.name)
+        }
+
+        let newSource = makeSource(for: camera, isPending: true)
+        switchLock.lock()
+        // A previous pending switch loses the race — tear it down.
+        let superseded = pendingSource
+        pendingSource = newSource
+        switchLock.unlock()
+        if let superseded {
+            teardownQueue.async { superseded.stop() }
+        }
+        newSource.start()
+    }
+
+    /// Called from the pending source's first frame: promote it, retire the old.
+    private func completeSwitch(from source: RTSPSource) {
+        switchLock.lock()
+        guard pendingSource === source else {
+            switchLock.unlock()
+            return
+        }
+        let old = activeSource
+        activeSource = source
+        pendingSource = nil
+        switchLock.unlock()
+        if let old {
+            teardownQueue.async { old.stop() }
+        }
+        setSwitching(false)
+        log.info("switch complete — new source live")
+    }
+
+    private func makeSource(for camera: CameraConfig, isPending: Bool) -> RTSPSource {
+        let source = RTSPSource(url: ConfigStore.resolvedURL(for: camera),
+                                fill: camera.fit == .fill)
+        source.onFrame = { [weak self, weak source] pixelBuffer, _ in
+            guard let self, let source else { return }
+            self.switchLock.lock()
+            let isActive = self.activeSource === source
+            let isPendingNow = self.pendingSource === source
+            self.switchLock.unlock()
+            if isPendingNow {
+                self.completeSwitch(from: source)
+            }
+            if isActive || isPendingNow {
+                self.sinkWriter.enqueue(pixelBuffer)
+            }
         }
         source.onStateChange = { [weak self] state in
             DispatchQueue.main.async {
+                guard let self else { return }
                 switch state {
-                case .idle: self?.statusText = "idle"
-                case .connecting: self?.statusText = "connecting to \(Self.cameraName)…"
-                case .streaming: self?.statusText = "streaming \(Self.cameraName)"
-                case .failed(let message): self?.statusText = "failed: \(message)"
+                case .idle: break
+                case .connecting: self.statusText = "connecting to \(camera.name)…"
+                case .streaming: self.statusText = "streaming \(camera.name)"
+                case .failed(let message): self.statusText = "\(camera.name): \(message)"
                 }
             }
         }
-        self.source = source
-        source.start()
+        return source
+    }
+
+    private func setSwitching(_ on: Bool) {
+        guard let device = CMIOHelpers.findDevice(uid: SinkWriter.deviceUID) else { return }
+        CMIOHelpers.writeCustomString(device: device, code: "rswt", value: on ? "1" : "0")
     }
 
     /// Log poll findings only when they change, so the log stays readable.
@@ -104,14 +228,5 @@ final class RCamController: ObservableObject {
         guard message != lastPollDiagnostic else { return }
         lastPollDiagnostic = message
         log.info("poll: \(message, privacy: .public)")
-    }
-
-    private func disconnect() {
-        log.info("unwatched for \(Self.unwatchedGrace)s — disconnecting RTSP")
-        source?.stop()
-        source = nil
-        sinkWriter.stop()
-        unwatchedSince = nil
-        statusText = "idle (no clients)"
     }
 }

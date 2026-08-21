@@ -67,6 +67,44 @@ enum PlaceholderRenderer {
         return buffer
     }
 
+    /// Small luma bitmap of a text badge (white on dark), rendered once and
+    /// cached — blitted onto outgoing frames by the emit loop.
+    static func badge(text: String, pointSize: CGFloat = 28) -> DigitGlyph? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = badgeCache[text] { return cached }
+
+        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, pointSize, nil)
+        let attributed = NSAttributedString(string: text, attributes: [
+            NSAttributedString.Key(kCTFontAttributeName as String): font,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0.95, alpha: 1.0),
+        ])
+        let line = CTLineCreateWithAttributedString(attributed)
+        let textWidth = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        let padding: CGFloat = 14
+        let width = Int(ceil(textWidth + padding * 2))
+        let height = Int(ceil(pointSize * 1.4 + padding))
+        var pixels = [UInt8](repeating: 22, count: width * height) // dark backdrop
+        pixels.withUnsafeMutableBytes { raw in
+            guard let context = CGContext(
+                data: raw.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width,
+                space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+            ) else { return }
+            context.textPosition = CGPoint(x: padding, y: pointSize * 0.42)
+            CTLineDraw(line, context)
+        }
+        let glyph = DigitGlyph(width: width, height: height, pixels: pixels)
+        badgeCache[text] = glyph
+        return glyph
+    }
+
+    private static var badgeCache = [String: DigitGlyph]()
+
     /// Grayscale bitmaps for digits 0–9, rendered once per point size.
     static func digitGlyphs(pointSize: CGFloat) -> [DigitGlyph] {
         lock.lock()

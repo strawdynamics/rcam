@@ -63,6 +63,7 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
     // Both are strings: watched is "0"/"1" so the app-side read path is uniform.
     static let watchedProperty = CMIOExtensionProperty(rawValue: "4cc_rwch_glob_0000")
     static let cameraNameProperty = CMIOExtensionProperty(rawValue: "4cc_rnam_glob_0000")
+    static let switchingProperty = CMIOExtensionProperty(rawValue: "4cc_rswt_glob_0000")
 
     private(set) var device: CMIOExtensionDevice!
     private var sourceStreamSource: RCamSourceStreamSource!
@@ -72,6 +73,7 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private var streamingCounter = 0
     private var sinkConnected = false
     private var activeCameraName = ""
+    private var switching = false
     private let debugBars = ProcessInfo.processInfo.environment["RCAM_TEST_BARS"] != nil
 
     private let timerQueue = DispatchQueue(label: "com.paulstraw.rcam.extension.emit",
@@ -143,7 +145,8 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
     }
 
     var availableProperties: Set<CMIOExtensionProperty> {
-        [.deviceTransportType, .deviceModel, Self.watchedProperty, Self.cameraNameProperty]
+        [.deviceTransportType, .deviceModel,
+         Self.watchedProperty, Self.cameraNameProperty, Self.switchingProperty]
     }
 
     func deviceProperties(
@@ -173,6 +176,15 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
                 forProperty: Self.cameraNameProperty
             )
         }
+        if properties.contains(Self.switchingProperty) {
+            stateLock.lock()
+            let switchingNow = switching
+            stateLock.unlock()
+            deviceProperties.setPropertyState(
+                CMIOExtensionPropertyState(value: (switchingNow ? "1" : "0") as NSString),
+                forProperty: Self.switchingProperty
+            )
+        }
         return deviceProperties
     }
 
@@ -183,6 +195,13 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
             activeCameraName = name
             stateLock.unlock()
             extensionLog.info("activeCameraName set to \(name, privacy: .public)")
+        }
+        if let state = deviceProperties.propertiesDictionary[Self.switchingProperty],
+           let raw = state.value as? String {
+            stateLock.lock()
+            switching = raw == "1"
+            stateLock.unlock()
+            extensionLog.info("switching set to \(raw, privacy: .public)")
         }
     }
 
@@ -233,7 +252,13 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
     /// (sink merely stale) → placeholder. Timestamps are derived from the tick
     /// index — monotonic, evenly spaced, never a source PTS.
     private func emitFrame() {
-        let pixelBuffer = nextOutputBuffer()
+        var pixelBuffer = nextOutputBuffer()
+        stateLock.lock()
+        let switchingNow = switching
+        stateLock.unlock()
+        if switchingNow, let base = pixelBuffer, let badged = withConnectingBadge(base) {
+            pixelBuffer = badged
+        }
         guard let pixelBuffer else {
             extensionLog.error("emitFrame: no buffer available this tick")
             return
@@ -323,6 +348,69 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
 
     private func monotonicNow() -> CFTimeInterval {
         Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) / Double(NSEC_PER_SEC)
+    }
+
+    // MARK: "Connecting…" badge overlay
+
+    private lazy var overlayPool: CVPixelBufferPool? = {
+        let attributes: [CFString: Any] = [
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelBufferWidthKey: Int(kOutputWidth),
+            kCVPixelBufferHeightKey: Int(kOutputHeight),
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
+        ]
+        var pool: CVPixelBufferPool?
+        CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, attributes as CFDictionary, &pool)
+        return pool
+    }()
+
+    /// Copy the frame (never mutate a sink buffer in place — the writer may
+    /// still hold it) and blit the cached badge bottom-center.
+    private func withConnectingBadge(_ source: CVPixelBuffer) -> CVPixelBuffer? {
+        guard let overlayPool,
+              let badge = PlaceholderRenderer.badge(text: "Connecting…") else { return nil }
+        var copyOpt: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, overlayPool, &copyOpt)
+        guard let copy = copyOpt else { return nil }
+
+        CVPixelBufferLockBaseAddress(source, .readOnly)
+        CVPixelBufferLockBaseAddress(copy, [])
+        defer {
+            CVPixelBufferUnlockBaseAddress(copy, [])
+            CVPixelBufferUnlockBaseAddress(source, .readOnly)
+        }
+        guard let srcY = CVPixelBufferGetBaseAddressOfPlane(source, 0),
+              let srcC = CVPixelBufferGetBaseAddressOfPlane(source, 1),
+              let dstY = CVPixelBufferGetBaseAddressOfPlane(copy, 0),
+              let dstC = CVPixelBufferGetBaseAddressOfPlane(copy, 1) else { return nil }
+        let width = Int(kOutputWidth)
+        let height = Int(kOutputHeight)
+        let srcYStride = CVPixelBufferGetBytesPerRowOfPlane(source, 0)
+        let srcCStride = CVPixelBufferGetBytesPerRowOfPlane(source, 1)
+        let dstYStride = CVPixelBufferGetBytesPerRowOfPlane(copy, 0)
+        let dstCStride = CVPixelBufferGetBytesPerRowOfPlane(copy, 1)
+        for row in 0..<height {
+            memcpy(dstY + row * dstYStride, srcY + row * srcYStride, width)
+        }
+        for row in 0..<(height / 2) {
+            memcpy(dstC + row * dstCStride, srcC + row * srcCStride, width)
+        }
+
+        // Badge bottom-center; neutralize chroma underneath so it reads white.
+        let originX = (width - badge.width) / 2
+        let originY = height - badge.height - 48
+        let yPlane = dstY.assumingMemoryBound(to: UInt8.self)
+        badge.pixels.withUnsafeBufferPointer { src in
+            for row in 0..<badge.height {
+                memcpy(yPlane + (originY + row) * dstYStride + originX,
+                       src.baseAddress! + row * badge.width, badge.width)
+            }
+        }
+        let chromaX = originX & ~1
+        for row in (originY / 2)..<((originY + badge.height) / 2) {
+            memset(dstC + row * dstCStride + chromaX, 128, badge.width & ~1)
+        }
+        return copy
     }
 }
 

@@ -35,6 +35,19 @@ struct CLIMain {
                 outDir = args[index + 1]
             }
             exit(CaptureCommand.run(url: url, seconds: seconds, outDir: outDir))
+        case "select-camera":
+            guard let key = args.first else {
+                usage()
+                exit(64)
+            }
+            DistributedNotificationCenter.default().postNotificationName(
+                Notification.Name("com.paulstraw.rcam.selectCamera"),
+                object: key,
+                userInfo: nil,
+                deliverImmediately: true
+            )
+            print("posted selectCamera(\(key))")
+            exit(0)
         case "cmio-props":
             let uid = "7E5F9C1A-3B2D-4E6F-8A90-C1D2E3F4A5B6"
             guard let device = CMIOHelpers.findDevice(uid: uid) else {
@@ -60,6 +73,8 @@ struct CLIMain {
         usage: rcamcli <command>
           probe-device [--frames N]                       assert "RTSP Camera" exists and animates (default 30)
           capture <rtsp-url> [--seconds N] [--out <dir>]  decode RTSP, save every 30th frame as PNG
+          select-camera <name-or-id>                      switch RCam's active camera (via distributed notification)
+          cmio-props                                      dump the virtual device's custom properties
         """)
     }
 }
