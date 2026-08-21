@@ -1,8 +1,41 @@
 import SwiftUI
 import CoreVideo
 import CoreImage
+import ServiceManagement
 
 struct SettingsView: View {
+    @ObservedObject var config: ConfigStore
+    let controller: RCamController
+
+    var body: some View {
+        TabView {
+            CamerasPane(config: config, controller: controller)
+                .tabItem { Label("Cameras", systemImage: "video") }
+            GeneralPane(controller: controller)
+                .tabItem { Label("General", systemImage: "gearshape") }
+        }
+        .frame(minWidth: 640, minHeight: 440)
+    }
+}
+
+struct GeneralPane: View {
+    let controller: RCamController
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+
+    var body: some View {
+        Form {
+            Toggle("Launch RCam at login", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin) { _, newValue in
+                    if !controller.setLaunchAtLogin(newValue) {
+                        launchAtLogin = SMAppService.mainApp.status == .enabled
+                    }
+                }
+        }
+        .padding()
+    }
+}
+
+struct CamerasPane: View {
     @ObservedObject var config: ConfigStore
     let controller: RCamController
 

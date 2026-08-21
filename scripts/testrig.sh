@@ -63,8 +63,21 @@ EOF
     stop_rig
     echo "test rig stopped"
     ;;
+  stop-push)
+    # Kill just one push (simulates a camera dying); mediamtx stays up.
+    PATH_NAME="${2:?usage: testrig.sh stop-push <path>}"
+    [[ -f "$RIG_DIR/push-$PATH_NAME.pid" ]] && kill "$(cat "$RIG_DIR/push-$PATH_NAME.pid")" 2>/dev/null || true
+    rm -f "$RIG_DIR/push-$PATH_NAME.pid"
+    echo "push $PATH_NAME stopped"
+    ;;
+  start-push)
+    PATH_NAME="${2:?usage: testrig.sh start-push <path> [size]}"
+    SIZE="${3:-1280x720}"
+    push "$SIZE" "$PATH_NAME"
+    echo "push $PATH_NAME started ($SIZE)"
+    ;;
   *)
-    echo "usage: testrig.sh {start|stop}" >&2
+    echo "usage: testrig.sh {start|stop|stop-push <path>|start-push <path> [size]}" >&2
     exit 64
     ;;
 esac
