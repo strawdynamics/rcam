@@ -10,6 +10,15 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
 
     private let log = Logger(subsystem: "com.paulstraw.rcam", category: "ExtensionManager")
 
+    override init() {
+        super.init()
+        // Activate on every launch: no-op when already current, triggers the
+        // .replace path when the installed extension version is older.
+        DispatchQueue.main.async { [weak self] in
+            self?.activate()
+        }
+    }
+
     func activate() {
         let request = OSSystemExtensionRequest.activationRequest(
             forExtensionWithIdentifier: Self.extensionIdentifier,

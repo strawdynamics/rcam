@@ -34,7 +34,7 @@ Rules:
 | Topic | Decision |
 |---|---|
 | Signing | Apple Development, team **TK7EDP5B95**, Xcode-managed profiles. SIP stays ON; `systemextensionsctl developer` mode is unavailable. Dev loop = build → auto-bump extension version → copy app to `/Applications` → re-activate. |
-| Sandbox | Container app **is sandboxed** (`com.apple.security.app-sandbox` + `com.apple.security.network.client` + `com.apple.developer.system-extension.install`). Extension: sandbox only — **no** network entitlements, **no app groups** (app groups on the extension cause validation failures). |
+| Sandbox | Container app **is sandboxed** (`com.apple.security.app-sandbox` + `com.apple.security.network.client` + `com.apple.developer.system-extension.install`). Extension: sandbox, no network entitlements. **Correction (verified 2026-08-20 against sysextd log + OBS's shipping extension):** the extension **must** carry `com.apple.security.application-groups: [TK7EDP5B95.com.paulstraw.rcam]` — the CMIO category validator requires `CMIOExtensionMachServiceName` to descend from an app group in the extension's entitlements; without it activation fails with "invalid mach service name". Team-ID-prefixed group works with Xcode-managed dev signing. |
 | Decode path | **No ffmpeg subprocess, ever.** In-process: minimal **static FFmpeg** (demux only) + **VTDecompressionSession** (H.264 hardware decode) + **VTPixelTransferSession** (scale + letterbox to output format). |
 | Project | **XcodeGen** `project.yml`; three targets: app `RCam`, extension `RCamExtension`, CLI `rcamcli`. |
 | Frame pacing | The **extension owns the single 30Hz clock**. App just pushes frames when they arrive. |
@@ -100,11 +100,11 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 ### M1 — Extension shows a test pattern
 
-- [ ] 30Hz clock-driven emit loop in the extension (the permanent one — priority chain above, monotonic timestamps).
-- [ ] Animated 720p30 NV12 test pattern (moving color bars + frame counter) as the initial "no sink" placeholder source.
-- [ ] Cached CG placeholder rendering utility (used now for the pattern text, later for "Open RCam…" / "No signal").
-- [ ] Sink stream added alongside source (wired in M3, declared now so the format never changes later).
-- [ ] App triggers activation; handle re-activation on version change.
+- [x] 30Hz clock-driven emit loop in the extension (the permanent one — priority chain above, monotonic timestamps).
+- [x] Animated 720p30 NV12 test pattern (moving color bars + frame counter) as the initial "no sink" placeholder source.
+- [x] Cached CG placeholder rendering utility (used now for the pattern text, later for "Open RCam…" / "No signal").
+- [x] Sink stream added alongside source (wired in M3, declared now so the format never changes later).
+- [x] App triggers activation; handle re-activation on version change.
 
 **Verify (automated)**: build+install clean; then after the human gate, a tiny harness (`rcamcli probe-device`) enumerates `AVCaptureDevice`s (external/unknown types) and asserts "RTSP Camera" exists, captures 30 frames programmatically via `AVCaptureSession`, asserts 1280×720 and inter-frame pixel variance > 0 (pattern is animating, not frozen/black).
 
@@ -172,12 +172,35 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 ## State
 
-**Current milestone**: M1 (M0 complete)
+**Current milestone**: M1 — ⛔ **HUMAN GATE 1 pending** (all automatable M1 work done; extension state is `[activated waiting for user]`)
 
 **Blockers**: none
+
+### HUMAN GATE 1 — manual steps for the user
+
+Current state: RCam.app (build 1787281753) is installed in `/Applications` and running; the activation request was submitted and passed validation. `systemextensionsctl list` shows:
+
+```
+*  TK7EDP5B95  com.paulstraw.rcam.extension (0.1.0/1787281753)  [activated waiting for user]
+```
+
+Do this:
+
+1. **Approve the extension**: System Settings → Privacy & Security (scroll to the bottom) — or General → Login Items & Extensions → Camera Extensions — and allow the extension from "RCam" / Paul Straw. Re-run `systemextensionsctl list | grep rcam` and confirm state becomes `[activated enabled]`.
+2. **Visual check**: open QuickTime Player → File → New Movie Recording → camera dropdown next to the record button → pick **"RTSP Camera"**. You should see scrolling color bars with a frame counter incrementing at the top left.
+3. **Automated check** (after approval): run `./build/Build/Products/Debug/rcamcli probe-device` — it asserts the device exists, captures 30 frames, and verifies 1280×720 + animation. First run will prompt for camera access for your terminal; grant it.
+4. Resume the loop with: `/loop Read LOOP.md, then execute one iteration per its Loop Protocol.` (next iteration records the probe result and starts M2).
+
+Diagnostics if something is off:
+
+- Activation failures: `log show --last 5m --predicate 'process == "sysextd"' --info | grep -iE "rcam|error"` (the generic "Invalid code signature or missing entitlements" error's real cause is only in this log)
+- Extension runtime: `log stream --predicate 'subsystem == "com.paulstraw.rcam.extension"' --level debug`
+- App side: `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info`
+- If wedged: `systemextensionsctl reset` (needs your password), sometimes a reboot.
 
 ### Iteration Log
 
 (append one line per iteration)
 
+- 2026-08-20 M1: Emit loop (30Hz DispatchSourceTimer, PTS = base host time + tick/30), scrolling-bars NV12 test pattern w/ frame counter, cached CG placeholder+digit renderer, sink stream declared, auto-activation on launch, rcamcli probe-device harness. Two activation fixes found via sysextd log: (1) extension Info.plist needs NSSystemExtensionUsageDescription for the cmio category, (2) extension entitlements need team-prefixed app group TK7EDP5B95.com.paulstraw.rcam (mach service name must descend from an app group — locked-decision table corrected). Extension now `[activated waiting for user]` → stopped at HUMAN GATE 1.
 - 2026-08-20 M0: Full scaffold — git init, brew installed xcodegen+mediamtx, project.yml (3 targets, XcodeGen embeds sysext correctly), skeleton app/extension/CLI, scripts/build.sh. Verified: build.sh exit 0; app entitlements (sandbox, network.client, system-extension.install, team TK7EDP5B95); extension embedded at Contents/Library/SystemExtensions with sandbox-only entitlements, CMIOExtensionMachServiceName=TK7EDP5B95.com.paulstraw.rcam.extension, CFBundleVersion epoch-stamped.
