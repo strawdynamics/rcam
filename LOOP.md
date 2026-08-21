@@ -117,10 +117,10 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 ### M2 — Decode path proven in isolation (CLI)
 
-- [ ] `scripts/build-ffmpeg.sh`: fetch FFmpeg release source (pin a recent 7.x tag), configure minimal static demux-only build, arm64:
+- [x] `scripts/build-ffmpeg.sh`: fetch FFmpeg release source (pin a recent 7.x tag), configure minimal static demux-only build, arm64:
   `--disable-everything --disable-shared --enable-static --disable-programs --disable-doc --disable-autodetect --enable-network --enable-protocol=tcp,rtp,udp --enable-demuxer=rtsp,sdp --enable-parser=h264 --enable-bsf=h264_mp4toannexb,extract_extradata --disable-decoders --disable-encoders --disable-muxers --disable-filters --disable-swscale --disable-swresample --disable-avdevice`
   Install to `vendor/ffmpeg/` (headers + `.a`s: libavformat, libavcodec, libavutil). Commit the script, not the source tree; commit the built artifacts (small, and makes the loop reproducible).
-- [ ] `scripts/testrig.sh {start|stop}`: idempotently runs mediamtx + Homebrew-ffmpeg push of `testsrc2=size=1280x720:rate=30` with burned-in frame counter, H.264 `-tune zerolatency -g 30`, at `rtsp://127.0.0.1:8554/test`. Also a second 640×360 path to exercise upscale+letterbox.
+- [x] `scripts/testrig.sh {start|stop}`: idempotently runs mediamtx + Homebrew-ffmpeg push of `testsrc2=size=1280x720:rate=30` with burned-in frame counter, H.264 `-tune zerolatency -g 30`, at `rtsp://127.0.0.1:8554/test`. Also a second 640×360 path to exercise upscale+letterbox. *(Note: Homebrew ffmpeg 8.0.1 has no drawtext — uses `testsrc`, whose built-in burned-in clock serves as the counter.)*
 - [ ] `RTSPSource` (app framework code, shared with CLI): C-interop wrapper over libavformat — open with TCP transport + low-latency opts, read H.264 packets, annex-B convert, build `CMVideoFormatDescription` from SPS/PPS, feed `VTDecompressionSession`, scale/letterbox via `VTPixelTransferSession` (`kVTPixelTransferPropertyKey_ScalingMode` letterbox) to 1280×720 NV12.
 - [ ] `FrameSource` protocol: `start/stop`, callback delivering `(CVPixelBuffer, arrival: TimeInterval)`, state (connecting/streaming/failed). Freeze it here.
 - [ ] `rcamcli capture <rtsp-url> --seconds N --out <dir>`: writes every 30th decoded frame as PNG + prints fps/latency stats.
@@ -172,35 +172,14 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 ## State
 
-**Current milestone**: M1 — ⛔ **HUMAN GATE 1 pending** (all automatable M1 work done; extension state is `[activated waiting for user]`)
+**Current milestone**: M2 (M0–M1 complete; HUMAN GATE 1 cleared 2026-08-20 — extension `[activated enabled]`, QuickTime shows moving bars, `rcamcli probe-device` passed: 30 frames, 1280x720, 21/29 pairs animating)
 
 **Blockers**: none
-
-### HUMAN GATE 1 — manual steps for the user
-
-Current state: RCam.app (build 1787281753) is installed in `/Applications` and running; the activation request was submitted and passed validation. `systemextensionsctl list` shows:
-
-```
-*  TK7EDP5B95  com.paulstraw.rcam.extension (0.1.0/1787281753)  [activated waiting for user]
-```
-
-Do this:
-
-1. **Approve the extension**: System Settings → Privacy & Security (scroll to the bottom) — or General → Login Items & Extensions → Camera Extensions — and allow the extension from "RCam" / Paul Straw. Re-run `systemextensionsctl list | grep rcam` and confirm state becomes `[activated enabled]`.
-2. **Visual check**: open QuickTime Player → File → New Movie Recording → camera dropdown next to the record button → pick **"RTSP Camera"**. You should see scrolling color bars with a frame counter incrementing at the top left.
-3. **Automated check** (after approval): run `./build/Build/Products/Debug/rcamcli probe-device` — it asserts the device exists, captures 30 frames, and verifies 1280×720 + animation. First run will prompt for camera access for your terminal; grant it.
-4. Resume the loop with: `/loop Read LOOP.md, then execute one iteration per its Loop Protocol.` (next iteration records the probe result and starts M2).
-
-Diagnostics if something is off:
-
-- Activation failures: `log show --last 5m --predicate 'process == "sysextd"' --info | grep -iE "rcam|error"` (the generic "Invalid code signature or missing entitlements" error's real cause is only in this log)
-- Extension runtime: `log stream --predicate 'subsystem == "com.paulstraw.rcam.extension"' --level debug`
-- App side: `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info`
-- If wedged: `systemextensionsctl reset` (needs your password), sometimes a reboot.
 
 ### Iteration Log
 
 (append one line per iteration)
 
+- 2026-08-20 M2 (part 1): Gate 1 cleared by user. build-ffmpeg.sh (7.1.1 static demux-only, arm64, 11MB libs committed to vendor/ffmpeg) + testrig.sh (mediamtx, testsrc→h264 720p30 + 360p30, idempotent start/stop verified via ffprobe). Next: RTSPSource + FrameSource + rcamcli capture.
 - 2026-08-20 M1: Emit loop (30Hz DispatchSourceTimer, PTS = base host time + tick/30), scrolling-bars NV12 test pattern w/ frame counter, cached CG placeholder+digit renderer, sink stream declared, auto-activation on launch, rcamcli probe-device harness. Two activation fixes found via sysextd log: (1) extension Info.plist needs NSSystemExtensionUsageDescription for the cmio category, (2) extension entitlements need team-prefixed app group TK7EDP5B95.com.paulstraw.rcam (mach service name must descend from an app group — locked-decision table corrected). Extension now `[activated waiting for user]` → stopped at HUMAN GATE 1.
 - 2026-08-20 M0: Full scaffold — git init, brew installed xcodegen+mediamtx, project.yml (3 targets, XcodeGen embeds sysext correctly), skeleton app/extension/CLI, scripts/build.sh. Verified: build.sh exit 0; app entitlements (sandbox, network.client, system-extension.install, team TK7EDP5B95); extension embedded at Contents/Library/SystemExtensions with sandbox-only entitlements, CMIOExtensionMachServiceName=TK7EDP5B95.com.paulstraw.rcam.extension, CFBundleVersion epoch-stamped.

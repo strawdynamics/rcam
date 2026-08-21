@@ -1,0 +1,14 @@
+prefix=/Users/paulstraw/dev/rcam/vendor/ffmpeg
+exec_prefix=${prefix}
+libdir=/Users/paulstraw/dev/rcam/vendor/ffmpeg/lib
+includedir=/Users/paulstraw/dev/rcam/vendor/ffmpeg/include
+
+Name: libavutil
+Description: FFmpeg utility library
+Version: 59.39.100
+Requires: 
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavutil -pthread -lm -framework CoreFoundation -framework CoreVideo -framework CoreMedia
+Libs.private: 
+Cflags: -I${includedir}
