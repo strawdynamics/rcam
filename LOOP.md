@@ -141,12 +141,12 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 ### M4 — Menu bar UI, config, multi-camera, switching
 
-- [ ] Config store: JSON model above, in the app container's Application Support; Keychain read/write for per-camera credentials; URL+creds merged only in memory at connect time.
-- [ ] `MenuBarExtra`: radio list of cameras (checkmark = active), "Settings…", "Quit". Selecting a camera switches the active source.
-- [ ] Settings window: camera list CRUD, fields for name / main URL / sub URL / prefer-sub / fit-vs-fill, credentials fields (→ Keychain), manual entry only.
-- [ ] "Test Connection" per camera: grab one frame via `FrameSource`, show thumbnail or error inline.
-- [ ] Source switching: on switch, app keeps pushing last-good old-source frame while signaling "Connecting…" badge (custom property) until new source's first decoded frame, then cuts over. ~2s gap acceptable.
-- [ ] Update watched-state plumbing to drive whichever camera is selected; still never more than one connection (+ brief overlap during switch).
+- [x] Config store: JSON model above, in the app container's Application Support; Keychain read/write for per-camera credentials; URL+creds merged only in memory at connect time.
+- [x] `MenuBarExtra`: radio list of cameras (checkmark = active), "Settings…", "Quit". Selecting a camera switches the active source.
+- [x] Settings window: camera list CRUD, fields for name / main URL / sub URL / prefer-sub / fit-vs-fill, credentials fields (→ Keychain), manual entry only.
+- [x] "Test Connection" per camera: grab one frame via `FrameSource`, show thumbnail or error inline.
+- [x] Source switching: on switch, app keeps pushing last-good old-source frame while signaling "Connecting…" badge (custom property) until new source's first decoded frame, then cuts over. ~2s gap acceptable.
+- [x] Update watched-state plumbing to drive whichever camera is selected; still never more than one connection (+ brief overlap during switch).
 
 **Verify (automated)**: run two testrig paths as two "cameras"; UI-test or scripted switch (`rcamcli` can flip selection via the app's config + a distributed notification, or `osascript`) while `probe-device --capture` runs — assert frames from path A, then after switch frames from path B, with no delivery stall during the gap. Config JSON on disk contains no credentials. Commit.
 
@@ -172,28 +172,15 @@ Timestamps must be monotonic and evenly spaced (derive from `mach_absolute_time`
 
 ## State
 
-**Current milestone**: M4 — ⛔ **HUMAN GATE 2 pending** (M3 complete and verified)
-
-### HUMAN GATE 2 — manual steps for the user
-
-The test rig was left running deliberately (restart anytime with `scripts/testrig.sh start`). RCam is running from /Applications. Camera permission for RCam itself was granted during M3 (the app needs it to see its own virtual device — see Iteration Log).
-
-1. Open QuickTime → File → New Movie Recording → pick "RTSP Camera". Within ~2s you should see the mediamtx test pattern (color bars + running clock). That is the live RTSP feed flowing app → sink → extension.
-2. Ideally also try a real call (Zoom/Meet/FaceTime) with "RTSP Camera" selected.
-3. While the feed is up, Quit RCam from the menu bar icon. The feed must switch to the "Open RCam to select a source" placeholder without freezing the call/QuickTime.
-4. Reopen /Applications/RCam.app — the live feed should return within a few seconds.
-5. Resume the loop: `/loop Read LOOP.md, then execute one iteration per its Loop Protocol.` (next: M4 — config UI, multi-camera, switching)
-
-Diagnostics if needed:
-- App: `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info`
-- Extension: `log stream --predicate 'subsystem == "com.paulstraw.rcam.extension"' --info`
-- If the device disappears after a rebuild (extension replacement race): quit RCam, run `scripts/build.sh`, reopen RCam — a fresh version bump re-registers it.
+**Current milestone**: M5 (M0–M4 complete; Gates 1–2 cleared)
 
 **Blockers**: none
 
 ### Iteration Log
 
 (append one line per iteration)
+
+- 2026-08-20 M4: Gate 2 cleared by user (QuickTime + Discord call + failover + relaunch). Config store (JSON in container App Support, no creds; Keychain per-camera id), MenuBarExtra radio list + Settings CRUD window w/ Test Connection thumbnail, RTSPSource fill mode (CropSourceToCleanAperture), overlap switching (old source feeds sink until new source's first frame; 'rswt' custom prop → extension blits cached "Connecting…" badge onto a pool-copied frame), rcamcli select-camera via distributed notification. Verify: 300/300 frames across scripted A→B switch, single clean cut at frame 166 (luma 121.7→97.2), zero frames <60 luma (no placeholder gap), config JSON credential-free. New dev-loop fact: after an extension replacement the RUNNING app's DAL view is stale (fresh processes see the new device; the old app process does not) — always relaunch RCam after build.sh replaces the extension. Note: probe-device's changedPairs animation heuristic is calibrated for M1 color bars and reads testsrc as static; per-frame --dump-luma is the reliable signal.
 
 - 2026-08-20 M3: Full sink wiring works end-to-end. SinkWriter (CMIO C API, streams found by name), extension consume loop + custom props rwch/rnam (string-valued, 4cc_XXXX_glob_0000), decode-only-when-watched w/ 10s grace (log-verified exact), placeholder chain incl. "No signal — <name>" during reconnect. Verified: probe shows placeholder→live testrig transition; kill RCam mid-capture → 240/240 frames no stall; grace disconnect at exactly +10s. Two hard-won facts: (1) extension replacement can race launchd ("Submit job failed: Operation already in progress" → service removed, device gone) — remedy: quit app, rebuild (new CFBundleVersion), relaunch; kickstarting com.apple.cmio.LaunchCMIOUserExtensionsAgent did NOT help. (2) The DAL hides camera devices from apps without camera TCC — the container app itself needs NSCameraUsageDescription + com.apple.security.device.camera + AVCaptureDevice.requestAccess, else it cannot see its own virtual device (first poll transiently sees it, then it vanishes). Stopped at HUMAN GATE 2.
 

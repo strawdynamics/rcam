@@ -12,6 +12,7 @@ public final class RTSPSource: FrameSource {
     public var onStateChange: ((FrameSourceState) -> Void)?
 
     private let url: String
+    private let fill: Bool
     private let stopFlag = StopFlag()
     private var thread: Thread?
     private let finished = DispatchSemaphore(value: 0)
@@ -22,8 +23,10 @@ public final class RTSPSource: FrameSource {
     private var outputPool: CVPixelBufferPool?
     private var decodeCounter: Int64 = 0
 
-    public init(url: String) {
+    /// `fill: true` crops to fill the 16:9 output instead of letterboxing.
+    public init(url: String, fill: Bool = false) {
         self.url = url
+        self.fill = fill
         RTSPSource.initializeFFmpegOnce
     }
 
@@ -215,7 +218,8 @@ public final class RTSPSource: FrameSource {
                                            pixelTransferSessionOut: &transfer) == noErr,
               let transfer else { return false }
         VTSessionSetProperty(transfer, key: kVTPixelTransferPropertyKey_ScalingMode,
-                             value: kVTScalingMode_Letterbox)
+                             value: fill ? kVTScalingMode_CropSourceToCleanAperture
+                                         : kVTScalingMode_Letterbox)
         transferSession = transfer
 
         let poolAttributes: [CFString: Any] = [
