@@ -92,13 +92,19 @@ struct CameraEditor: View {
     @State private var username = ""
     @State private var password = ""
     @State private var credsLoaded = false
-    @State private var testResult: TestResult = .none
+    @State private var mainTest = StreamTest()
+    @State private var subTest = StreamTest()
 
-    enum TestResult {
-        case none
-        case testing
-        case ok(NSImage)
-        case error(String)
+    struct StreamTest {
+        enum Phase: Equatable {
+            case idle
+            case testing
+            case ok
+            case error(String)
+        }
+        var phase: Phase = .idle
+        var image: NSImage?
+        var info: RTSPSource.StreamInfo?
     }
 
     var body: some View {
@@ -121,29 +127,19 @@ struct CameraEditor: View {
                 }
             }
 
-            Section {
-                HStack(alignment: .top) {
-                    Button("Test Connection") { testConnection() }
-                        .disabled({ if case .testing = testResult { true } else { false } }())
-                    switch testResult {
-                    case .none:
-                        EmptyView()
-                    case .testing:
-                        ProgressView().controlSize(.small)
-                    case .ok(let image):
-                        Image(nsImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 192, height: 108)
-                            .border(Color.secondary)
-                    case .error(let message):
-                        Text(message)
-                            .foregroundStyle(.red)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+            Section("Preview") {
+                HStack(alignment: .top, spacing: 12) {
+                    StreamPreviewCard(title: "Main",
+                                      isActive: !usesSubstream,
+                                      test: mainTest)
+                    if hasSubstream {
+                        StreamPreviewCard(title: "Sub",
+                                          isActive: usesSubstream,
+                                          test: subTest)
                     }
                 }
+                Button("Test Connection") { testConnection() }
+                    .disabled(mainTest.phase == .testing || subTest.phase == .testing)
             }
         }
         .padding()
@@ -157,26 +153,52 @@ struct CameraEditor: View {
         }
     }
 
+    private var hasSubstream: Bool {
+        !config.cameras[index].subURL.isEmpty
+    }
+
+    private var usesSubstream: Bool {
+        config.cameras[index].preferSub && hasSubstream
+    }
+
     private func testConnection() {
-        testResult = .testing
         let camera = config.cameras[index]
-        let source = RTSPSource(url: ConfigStore.resolvedURL(for: camera),
+        mainTest = StreamTest(phase: .testing)
+        runTest(base: camera.mainURL, camera: camera) { mutate in mutate(&mainTest) }
+        if hasSubstream {
+            subTest = StreamTest(phase: .testing)
+            runTest(base: camera.subURL, camera: camera) { mutate in mutate(&subTest) }
+        } else {
+            subTest = StreamTest()
+        }
+    }
+
+    /// Connects to one stream URL just long enough to capture a snapshot and
+    /// its native properties. `update` applies a mutation to that stream's
+    /// StreamTest state on the main thread.
+    private func runTest(base: String, camera: CameraConfig,
+                         update: @escaping ((inout StreamTest) -> Void) -> Void) {
+        let source = RTSPSource(url: ConfigStore.resolvedURL(base, cameraID: camera.id),
                                 fill: camera.fit == .fill)
         var finished = false
-        let finish: (TestResult) -> Void = { result in
+        let finish: (StreamTest.Phase) -> Void = { phase in
             DispatchQueue.main.async {
                 guard !finished else { return }
                 finished = true
-                testResult = result
+                update { $0.phase = phase }
                 DispatchQueue.global().async { source.stop() }
             }
+        }
+        source.onStreamInfo = { info in
+            DispatchQueue.main.async { update { $0.info = info } }
         }
         source.onFrame = { pixelBuffer, _ in
             let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
             let rep = NSCIImageRep(ciImage: ciImage)
             let image = NSImage(size: rep.size)
             image.addRepresentation(rep)
-            finish(.ok(image))
+            DispatchQueue.main.async { update { $0.image = image } }
+            finish(.ok)
         }
         source.onStateChange = { state in
             if case .failed(let message) = state {
@@ -186,6 +208,100 @@ struct CameraEditor: View {
         source.start()
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
             finish(.error("timed out after 10s"))
+        }
+    }
+}
+
+struct StreamPreviewCard: View {
+    let title: String
+    let isActive: Bool
+    let test: CameraEditor.StreamTest
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                if isActive {
+                    Text("In Use")
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.tint.opacity(0.15), in: Capsule())
+                        .foregroundStyle(.tint)
+                }
+                Spacer()
+                if test.phase == .testing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            snapshot
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            if let details = detailsText {
+                Text(details)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if case .error(let message) = test.phase {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var snapshot: some View {
+        if let image = test.image {
+            Image(nsImage: image)
+                .resizable()
+        } else {
+            ZStack {
+                Rectangle()
+                    .fill(.quaternary)
+                switch test.phase {
+                case .idle:
+                    Image(systemName: "video")
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                case .error:
+                    Image(systemName: "video.slash")
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                case .testing, .ok:
+                    EmptyView()
+                }
+            }
+        }
+    }
+
+    private var detailsText: String? {
+        guard let info = test.info else { return nil }
+        var parts: [String] = []
+        if info.width > 0 && info.height > 0 {
+            parts.append("\(info.width)×\(info.height)")
+        }
+        parts.append(Self.displayName(codec: info.codec))
+        if let frameRate = info.frameRate {
+            parts.append(String(format: frameRate.truncatingRemainder(dividingBy: 1) == 0
+                                    ? "%.0f fps" : "%.1f fps", frameRate))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func displayName(codec: String) -> String {
+        switch codec {
+        case "h264": return "H.264"
+        case "hevc": return "HEVC"
+        default: return codec.uppercased()
         }
     }
 }
