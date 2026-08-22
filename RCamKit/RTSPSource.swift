@@ -63,6 +63,9 @@ public final class RTSPSource: FrameSource {
 
     deinit {
         stop()
+        // Cheap, and exactly the signal that was missing when Test Connection
+        // was leaking a source per run (finding 5).
+        log.info("deinit \(StreamHealth.streamLabel(forURL: self.url), privacy: .public)")
     }
 
     public func start() {
