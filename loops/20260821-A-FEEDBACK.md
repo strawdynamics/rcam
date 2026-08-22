@@ -252,7 +252,7 @@ Diagnostics: `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info`
 
 ## State
 
-**Current milestone**: **⛔ HUMAN GATE — real-camera validation.** All six milestones (F0–F6) are done, verified and committed on `review-fixes`. The loop is stopped. Nothing further is automatable without real cameras and a reboot.
+**Current milestone**: **⛔ HUMAN GATE — real-camera validation.** All six milestones (F0–F6) are done, verified and committed on `review-fixes`, and as of 2026-08-22 both Blockers are closed (see the F7 log entry): the `build.sh` extension-version fix is confirmed against a live device, and `probe-device`'s animation metric is rebuilt and passing. The loop is stopped. **Everything automatable is now done** — what is left in the GATE HANDOFF needs real cameras, other apps, and human eyes.
 
 F0 complete. Notes carried forward:
 - The git housekeeping from the earlier draft (commit the `loops/` move, fast-forward `main` to `app-icon`) was already done before this loop started: `main` already contained it, and `app-icon` is now a stale duplicate that differs from `main` only in this doc. `review-fixes` was branched from `main` at `cf4c3b9`.
@@ -267,16 +267,16 @@ F1 complete. Notes carried forward:
 
 **Blockers**:
 
-- **`probe-device`'s animation assertion is mis-calibrated and has almost certainly never passed.** Found at the gate, 2026-08-21. `assess()` requires the **whole-frame mean luma** to move by >0.05 on >=25% of consecutive frame pairs. Neither source can satisfy that:
+- **[RESOLVED 2026-08-22] `probe-device`'s animation assertion was mis-calibrated and had never passed.** Found at the gate, 2026-08-21; replaced with a signature run-length test on 2026-08-22 (see the F7 log entry for the ground truth and the new thresholds). Original diagnosis kept below. `assess()` requires the **whole-frame mean luma** to move by >0.05 on >=25% of consecutive frame pairs. Neither source can satisfy that:
   - *Rig* (`testsrc=1280x720:rate=30`) is static colour bars with a burned-in clock. Only the clock region changes, so a 921,600-pixel average barely moves. Measured: `fps=30.5`, 14 distinct luma values over 150 frames, **3.05 luma steps/sec vs the 7.52/sec the threshold demands**. Real exit code **3**.
   - *Real camera* (Front door, a static night scene) is worse: `changedPairs=2/119`, though frames are provably live — luma drifts 95.0 -> 95.1 -> 94.9 and `meanLuma` swung 74.9 -> 95.1 -> 64.8 across runs as auto-exposure settled.
   - Every *other* criterion passes on both sources: frame count, 1280x720, full 30fps, non-black. **The sink path is healthy; the tool is wrong.**
   - Earlier milestones never caught this because they only ever quoted `meanLuma` (F5) and F6 recorded the check as blocked, so nobody had seen its verdict.
-  - **Fix in progress, NOT finished.** `FrameStat` now carries an FNV-1a `signature` hashed over the same 16px sampled grid the mean already walks (free), and `assess()` prints `distinct=` and `sigChanged=`. **The old luma assertion is deliberately still in place** — per the loop's "do not weaken a verification to make it pass" rule the threshold must be chosen from measured ground truth in all three states (frozen placeholder, live rig, live real camera), and the device died before those measurements could be taken. Build green, `scripts/test.sh` 48/48.
+  - **Fixed 2026-08-22.** Ground truth was measured in all three states and the luma assertion was replaced by a run-length test on the frame signature. Details in the F7 iteration-log entry.
 
-- **[FIXED — pending post-reboot confirmation] Extension replacement kills the virtual device until a reboot.** Root cause found 2026-08-21: `scripts/build.sh` wrote `CURRENT_PROJECT_VERSION = $(date +%s)` on **every** build, and both the app and the extension took `CFBundleVersion` from it. macOS ignores a re-activation at an unchanged version but treats a new version as an **upgrade** — which tears the running extension down, retires the old copy to `[terminated waiting to uninstall on reboot]`, and leaves "RTSP Camera" missing until a reboot. The clock stamp therefore forced an upgrade even for builds that touched only app or `rcamcli` code (this was hit by a one-line `ProbeDevice.swift` edit). The stamp was deliberate — its comment explains it was added so extension changes actually take effect — but it fired unconditionally.
+- **[FIXED AND CONFIRMED 2026-08-22] Extension replacement kills the virtual device until a reboot.** Root cause found 2026-08-21: `scripts/build.sh` wrote `CURRENT_PROJECT_VERSION = $(date +%s)` on **every** build, and both the app and the extension took `CFBundleVersion` from it. macOS ignores a re-activation at an unchanged version but treats a new version as an **upgrade** — which tears the running extension down, retires the old copy to `[terminated waiting to uninstall on reboot]`, and leaves "RTSP Camera" missing until a reboot. The clock stamp therefore forced an upgrade even for builds that touched only app or `rcamcli` code (this was hit by a one-line `ProbeDevice.swift` edit). The stamp was deliberate — its comment explains it was added so extension changes actually take effect — but it fired unconditionally.
   **Fix:** the extension now takes its version from `EXTENSION_PROJECT_VERSION`, derived from the extension's own inputs (`RCamExtension/` plus `project.yml`) and held in the gitignored `Configs/extension-version.txt`. Unchanged inputs reuse the version, so re-activation is a no-op and the device should survive the build; changed inputs bump a **monotonic counter** (not the hash itself, so reverting the extension is a forward change rather than a rejected downgrade), seeded above any already-installed version. `build.sh` now says which case it hit and warns when a build is a genuine upgrade.
-  **Verified so far (no device needed):** two consecutive builds with no extension change held the extension at `1787380193` while the app moved `1787380650 -> 1787380667`; touching `RCamExtension/main.swift` bumped it to `1787380194` with the upgrade warning; seeding read the installed `1787380192` and started above it. **Not yet verified:** that an unchanged-extension build actually leaves the running extension alive — that needs the reboot first, and is the first thing to check afterwards.
+  **Confirmed with the device live on 2026-08-22 — see the F7 log entry: a no-op build left the extension *process* alive at the same pid and the device continuously present.** Earlier bench verification (no device needed): two consecutive builds with no extension change held the extension at `1787380193` while the app moved `1787380650 -> 1787380667`; touching `RCamExtension/main.swift` bumped it to `1787380194` with the upgrade warning; seeding read the installed `1787380192` and started above it.
   Note `systemextensionsctl developer on` is **not** an option: it requires SIP to be disabled.
 
 - **[SUPERSEDED by the fix above] Extension replacement kills the virtual device until a reboot — now a reproducible trigger, not an intermittent one.** Every `scripts/build.sh` replaces the system extension; afterwards `systemextensionsctl list` shows the new build `[activated enabled]` and the old one `[terminated waiting to uninstall on reboot]`, but **no extension process runs at all** and `probe-device` reports `device "RTSP Camera" not found`. Tried on 2026-08-21 after the reboot: quit+relaunch RCam (twice, as the doc prescribes), a 20s wait, and a `system_profiler SPCameraDataType` to force DAL enumeration — three strikes, stopped per the loop rule. Note this happened with only **1** stale entry queued, so the earlier "21 stale sysexts" backlog theory is **not** the whole cause; a plain extension swap is enough. Practical consequence: **any rebuild costs a reboot before the camera can be exercised again.** Batch code changes accordingly.
@@ -307,6 +307,32 @@ F1 complete. Notes carried forward:
 
 - 2026-08-21 GATE (post-reboot session): reboot cleared the sysext backlog (21 -> 0) and the virtual device returned. Closed three gate items by machine — real-camera streaming on the macOS 15 build (Front door, 1280x720 @ 30.5fps end to end), finding 2's no-credentials-in-diagnostics check against a **real authenticated camera** (thread name `RTSPSource(192.168.40.126:554/cam/realmonitor)`, 0 credential-shaped strings in `sample RCam`), and config durability (`cameras.json` has no credential fields at all). Also diagnosed why the menu-bar icon was invisible: **Bartender 5**, not RCam — the status item existed at full size (37x24) but was parked at x=-1435, off the left edge of the only 2560pt display, because Bartender's `DefaultedToBartenderBar = 1` hides unknown new items and it had no entry for RCam. Then found that `probe-device`'s animation assertion fails on the rig too (real exit 3) and is mis-calibrated by ~2.5x — see Blockers; a signature-based replacement is started but deliberately unfinished, and the extension died on rebuild before ground-truth measurements could be taken.
 
+- 2026-08-22 F7 (post-reboot session 2): closed both remaining Blockers.
+
+  **1. The `build.sh` extension-version fix is confirmed with the device live.** The payoff claim from 8e2c889 was untested; it now holds. Sequence: device present -> `scripts/build.sh --release` -> "Extension unchanged (version 1787380196) — re-activation is a no-op" -> `probe-device` still reports `OK: found "RTSP Camera"`, and the extension **process kept the same pid (5330)** across the build, across a quit+relaunch of RCam, and across three further `rcamcli`-only builds. The relaunch logged only `Activation finished with result 0` — no `Replacing extension` line — and the stale `waiting to uninstall` count did not grow. The cdhash question the fix's write-up left open is answered too: across a no-op build the installed extension binary is **byte-identical** (sha256 `9d55a0d9…`) and its **cdhash is unchanged** (`50b9f4f0…`), so macOS is not being asked to decide anything, on version or on hash. **Iteration no longer costs a reboot unless `RCamExtension/` or `project.yml` actually changes.**
+
+  Caveat worth carrying: **the reboot did not, by itself, bring the device back.** After the reboot the extension was `[activated enabled]` at 1787380195 with a stale 1787380192 still queued, yet no extension process ever launched and `probe-device` reported the device missing — through two RCam relaunches, a `system_profiler` enumeration, and ~6 minutes. No crash report; the process was never started at all. What fixed it was forcing a **fresh activation at a new version** (`rm Configs/extension-version.txt`, rebuild -> 1787380196), after which the extension launched immediately. So the recovery ritual is "force a version bump", not "reboot" — worth knowing, because a reboot alone can leave you stuck.
+
+  **2. `probe-device`'s animation metric is rebuilt on the frame signature.** Ground truth measured in all three states first, 300-frame samples at 1280x720/30fps:
+
+  | state | distinct | sigChanged | longestStaticRun | meanLuma |
+  |---|---|---|---|---|
+  | (a) frozen "No signal" placeholder | 1/300 | 0/299 | **300** (whole sample) | 29.6 |
+  | (b) live rig (`testsrc`, 30fps source) | 262-300 | 261-299 | **1-3** | 118-122 |
+  | (c) live real camera (Front door) | 139-142 | 138-141 (~46%) | **7** | 95.0 |
+
+  The real camera is the case that decides the design. It feeds a 30fps output tick from a ~15fps source, so about every other emitted frame is a *legitimate* repeat and only ~46% of pairs change. Any fraction-based threshold therefore has to sit below 46% — i.e. below the old broken check's own 25% — which is why the replacement is a **run-length** test instead: run length is independent of the source frame rate (halving the source rate doubles the run, it never approaches the sample size), whereas a fraction collapses toward the frozen case as the source slows.
+
+  New assertions in `assess()`, replacing the luma-delta one (the `meanLuma < 17` black guard is kept, and it is worth noting it could never have caught this — the placeholder's background is luma 28):
+  - `longestStaticRun < min(30, max(2, frames/2))` — 30 frames is 1s at 30fps: **4.3x** above the worst live measurement and a tenth of the frozen one. The cap at half the sample keeps a short probe from passing while frozen throughout (at the 30-frame default a frozen run of 30 still fails).
+  - `distinct >= max(2, frames/10)` — catches a device cycling a few cached buffers, which would keep runs short without being live. Frozen is 0.3%, worst live 46%: **4.6x** margin.
+
+  This is strictly a better detector, not a looser one: it fails every frozen sample (which the old check also did, for the wrong reason) *and* passes every live one (which the old check never did). `assess()` also now prints `fps=` and `longestStaticRun=` with the active limits inline, `--dump-luma` prints the per-frame signature, and `--dump-luma` is finally listed in `usage()`.
+
+  Verified: **(b) `probe-device --frames 120` on the rig exits 0, three consecutive runs** (`longestStaticRun=1-2, distinct=96-120`) — the F6 check that had never been run. **(c)** real camera `--frames 120` exits 0 twice (`longestStaticRun=6-7, distinct=54-55`). **(a)** frozen placeholder `--frames 120` still exits **3** twice, now with an accurate message (`content frozen: 120 consecutive identical frames (limit 30)`) plus a hint pointing at the warm-up ritual. `scripts/test.sh` 48/48, `scripts/build.sh --release` 0.
+
+  Also measured, and worth knowing before anyone re-runs the gate: **`--frames 30` is too short to observe liveness at all.** 30 frames is 1s, less than the controller's 1s watch poll plus the RTSP connect, so a cold 30-frame probe reads the placeholder every time and now fails the animation check by construction. Treat `--frames 30` as an *existence* check (the `OK: found` line) and use `--frames 120` or more, after a throwaway `--frames 300`, for liveness. Rig stopped, "Front door" restored and streaming (`--frames 120` exit 0).
+
 ---
 
 ## ⛔ GATE HANDOFF — exact steps
@@ -321,17 +347,20 @@ Verified by machine, no human eyes needed:
 - [x] **macOS 15 deployment bump — app launches and streams from a real camera.** Front door delivered 1280x720 @ 30.5fps end to end (RTSP -> decode -> SinkWriter -> extension -> AVFoundation client).
 - [x] **No credentials in diagnostics (finding 2, real authenticated camera).** `sample RCam` shows the thread name as `RTSPSource(192.168.40.126:554/cam/realmonitor)` — host:port/path only, userinfo *and* query string stripped — and **0** occurrences of any `rtsp://...@...` credential-shaped string. This is credential-*agnostic*: rather than grepping for one known password it proves no credential-shaped string exists at all.
 - [x] **Config durability — no credentials in `cameras.json`.** The schema has no credential fields whatsoever (`fit`, `id`, `mainURL`, `name`, `preferSub`, `subURL`); passwords live only in the Keychain. 8 cameras: the 6 real ones plus Test A/Test B.
-- [ ] **`probe-device --frames 120`** — still open, blocked on the metric defect above, not on RCam.
+- [x] **`probe-device --frames 120`** — passes on the rig, exit 0, three consecutive runs (2026-08-22), after the animation metric was rebuilt. Also passes against the real camera, and still fails (exit 3) on a frozen placeholder.
 
 Two gotchas worth knowing before re-running any of this:
 
-1. **Warm-up is mandatory.** `probe-device` is usually the *only* client, so it cold-starts the whole chain: the controller's poll takes up to 1s to notice `watched=true`, then the RTSP connect/auth/first-keyframe takes seconds more. 120 frames is only ~4s, so a cold probe finishes before the first real frame arrives and reads the placeholder. Run a throwaway `--frames 300` first, then the real probe **within the 10s unwatched grace** so it lands on a live stream.
-2. **`--dump-luma` exists but is undocumented** in `usage()` — it is parsed at `CLIMain.swift` but not listed. It is the fastest way to tell "frozen" from "live but static": a frozen buffer gives a bit-identical value forever, a live static scene wobbles in the 0.1 range.
+1. **Warm-up is mandatory.** `probe-device` is usually the *only* client, so it cold-starts the whole chain: the controller's poll takes up to 1s to notice `watched=true`, then the RTSP connect/auth/first-keyframe takes seconds more. 120 frames is only ~4s, so a cold probe finishes before the first real frame arrives and reads the placeholder. Run a throwaway `--frames 300` first, then the real probe **within the 10s unwatched grace** so it lands on a live stream. `probe-device` now prints a note pointing at this whenever it fails the frozen check, so the symptom is self-diagnosing.
+2. **`--frames 30` cannot test liveness** — 1s is shorter than the poll-plus-connect latency, so it reads the placeholder every time and fails the animation check by construction. Use it only for the `OK: found "RTSP Camera"` existence line; use `--frames 120`+ for liveness (2026-08-22).
+3. **`--dump-luma` is now documented** in `usage()` and prints the per-frame signature alongside the luma. It is the fastest way to tell "frozen" from "live but static": a frozen buffer repeats one signature forever, a live static scene changes it on most frames.
+4. **A reboot alone may not republish the device.** If the extension is `[activated enabled]` but no extension process is running, force a fresh activation instead: `rm Configs/extension-version.txt && scripts/build.sh --release`, which bumps the extension version above the installed one, then relaunch RCam (2026-08-22).
 
-### Step 0 — reboot first (required)
+### Step 0 — make sure the virtual device is published
 
-Nothing below involving the virtual camera will work until the stale system-extension
-backlog is cleared. 21 copies are queued for uninstall-on-reboot.
+**Done 2026-08-22 — the device is up and RCam is streaming "Front door".** Re-run this only
+if `probe-device` reports the device missing. Note that a reboot alone did *not* republish it
+that day; forcing a fresh extension activation did (gotcha 4 above).
 
 ```sh
 # after rebooting:
@@ -347,8 +376,11 @@ If `probe-device` still fails, the app is fine but the device is not published �
 ### Step 1 — the two checks the rig could not do
 
 ```sh
+# DONE 2026-08-22 — exits 0 on the rig, three consecutive runs. Kept for re-runs:
 scripts/testrig.sh start
-build/Build/Products/Release/rcamcli probe-device --frames 120   # the one F6 check left unrun
+build/Build/Products/Release/rcamcli select-camera "Test A"
+build/Build/Products/Release/rcamcli probe-device --frames 300   # throwaway warm-up
+build/Build/Products/Release/rcamcli probe-device --frames 120   # the real check
 scripts/testrig.sh stop
 ```
 
