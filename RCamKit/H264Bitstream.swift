@@ -91,20 +91,56 @@ enum H264Bitstream {
         return units
     }
 
-    /// Annex-B → 4-byte-length-prefixed (AVCC) for VideoToolbox.
-    static func annexBToLengthPrefixed(data: UnsafePointer<UInt8>, size: Int) -> [UInt8]? {
+    /// The result of a single walk over one annex-B packet.
+    struct ConvertedPacket: Equatable {
+        /// Slice NALs, each preceded by a big-endian 4-byte length. Empty when
+        /// the packet carried only parameter sets or other units VT rejects.
+        let lengthPrefixed: [UInt8]
+        /// In-band parameter sets found in the same walk, if any. Tracked
+        /// separately because a camera may send SPS and PPS in different
+        /// packets.
+        let sps: [UInt8]?
+        let pps: [UInt8]?
+    }
+
+    /// One walk over an annex-B packet: builds the length-prefixed form
+    /// VideoToolbox wants *and* picks out any in-band SPS/PPS at the same
+    /// time, so watching for mid-stream parameter-set changes costs nothing
+    /// beyond the walk the decode path already performs.
+    ///
+    /// Returns nil when the buffer holds no NAL units at all.
+    static func convert(data: UnsafePointer<UInt8>, size: Int) -> ConvertedPacket? {
         let units = annexBNALUnits(data: data, size: size)
         guard !units.isEmpty else { return nil }
+
         var out = [UInt8]()
         out.reserveCapacity(size + 8)
+        var sps: [UInt8]?
+        var pps: [UInt8]?
+
         for unit in units {
             // Skip parameter/filler units VT doesn't want mid-sample; keep slices.
-            let type = unit.first.map { $0 & 0x1F } ?? 0
-            guard type != 7, type != 8, type != 9, type != 12 else { continue }
+            switch unit.first.map({ $0 & 0x1F }) ?? 0 {
+            case 7:
+                if sps == nil { sps = unit }
+                continue
+            case 8:
+                if pps == nil { pps = unit }
+                continue
+            case 9, 12:
+                continue
+            default:
+                break
+            }
             let length = UInt32(unit.count).bigEndian
             withUnsafeBytes(of: length) { out.append(contentsOf: $0) }
             out.append(contentsOf: unit)
         }
-        return out
+        return ConvertedPacket(lengthPrefixed: out, sps: sps, pps: pps)
+    }
+
+    /// Annex-B → 4-byte-length-prefixed (AVCC) for VideoToolbox.
+    static func annexBToLengthPrefixed(data: UnsafePointer<UInt8>, size: Int) -> [UInt8]? {
+        convert(data: data, size: size)?.lengthPrefixed
     }
 }
