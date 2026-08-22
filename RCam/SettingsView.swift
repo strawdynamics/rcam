@@ -98,10 +98,15 @@ struct GeneralPane: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-            } footer: {
-                Text("Connection status and extension install stay in the menu bar.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+
+                LabeledContent {
+                    Text(OutputFormat.sizeDescription)
+                        .fontDesign(.monospaced)
+                        .foregroundStyle(.secondary)
+                } label: {
+                    Text("Output video size")
+                    Text("Every camera is scaled to this size at \(OutputFormat.frameRate) fps.")
+                }
             }
         }
         .formStyle(.grouped)

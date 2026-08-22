@@ -361,8 +361,8 @@ public final class RTSPSource: FrameSource {
 
             let poolAttributes: [CFString: Any] = [
                 kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-                kCVPixelBufferWidthKey: 1280,
-                kCVPixelBufferHeightKey: 720,
+                kCVPixelBufferWidthKey: OutputFormat.width,
+                kCVPixelBufferHeightKey: OutputFormat.height,
                 kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
             ]
             var pool: CVPixelBufferPool?
