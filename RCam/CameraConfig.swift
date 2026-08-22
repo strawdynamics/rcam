@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import OSLog
 import Security
 
 enum FitMode: String, Codable, CaseIterable, Identifiable {
@@ -21,12 +23,30 @@ struct CameraConfig: Codable, Identifiable, Equatable {
 
 /// JSON persistence in the sandboxed app's Application Support container.
 final class ConfigStore: ObservableObject {
+    /// How long `save()` coalesces edits. Without it every keystroke in every
+    /// text field rewrites the file.
+    static let saveDebounceSeconds: TimeInterval = 0.5
+
     @Published var cameras: [CameraConfig] {
         didSet { save() }
     }
     @Published var selectedID: UUID? {
         didSet { UserDefaults.standard.set(selectedID?.uuidString, forKey: "selectedCameraID") }
     }
+
+    /// Non-nil when the config could not be read or could not be written.
+    /// Surfaced in the menu bar and at the top of Settings — a silent failure
+    /// here costs the user their whole camera list.
+    @Published private(set) var persistenceError: String?
+
+    /// Tracked separately so a later successful write clears the write error
+    /// without also clearing the "your old file was quarantined" notice.
+    private var loadError: String? { didSet { refreshPersistenceError() } }
+    private var saveError: String? { didSet { refreshPersistenceError() } }
+
+    private var pendingSave: DispatchWorkItem?
+    private var terminationObserver: NSObjectProtocol?
+    private let log = Logger(subsystem: "com.paulstraw.rcam", category: "ConfigStore")
 
     /// Application Support directory holding the config (and, from the
     /// user's point of view, "where RCam keeps its files").
@@ -42,13 +62,27 @@ final class ConfigStore: ObservableObject {
         directoryURL.appendingPathComponent("cameras.json")
     }
 
+    private static var quarantineURL: URL {
+        directoryURL.appendingPathComponent("cameras.json.bak")
+    }
+
     init() {
-        if let data = try? Data(contentsOf: Self.fileURL),
-           let loaded = try? JSONDecoder().decode([CameraConfig].self, from: data) {
-            cameras = loaded
+        // Three cases, deliberately distinguished. Collapsing "absent" and
+        // "unparseable" into an empty list is what made a corrupt file
+        // silently fatal: the next edit's save() would overwrite it.
+        let fileURL = Self.fileURL
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            cameras = []                                   // normal first run
         } else {
-            cameras = []
+            do {
+                let data = try Data(contentsOf: fileURL)
+                cameras = try JSONDecoder().decode([CameraConfig].self, from: data)
+            } catch {
+                cameras = []
+                loadError = Self.quarantine(fileURL, reason: error, log: log)
+            }
         }
+
         if let raw = UserDefaults.standard.string(forKey: "selectedCameraID"),
            let uuid = UUID(uuidString: raw) {
             selectedID = uuid
@@ -56,17 +90,81 @@ final class ConfigStore: ObservableObject {
         if selectedID == nil || !cameras.contains(where: { $0.id == selectedID }) {
             selectedID = cameras.first?.id
         }
+
+        // didSet does not fire for assignments made during init, so a load
+        // error set above has not reached `persistenceError` yet.
+        refreshPersistenceError()
+
+        // A debounced save must not be lost on quit.
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.flushPendingSave()
+        }
+    }
+
+    deinit {
+        if let terminationObserver {
+            NotificationCenter.default.removeObserver(terminationObserver)
+        }
+    }
+
+    /// Move an unreadable/unparseable config aside before anything can
+    /// overwrite it, and return the message to show the user.
+    private static func quarantine(_ fileURL: URL, reason: Error, log: Logger) -> String {
+        // Never clobber an existing quarantine — the older one is the more
+        // likely to still hold the user's real camera list.
+        var destination = quarantineURL
+        if FileManager.default.fileExists(atPath: destination.path) {
+            let stamp = ISO8601DateFormatter().string(from: Date())
+                .replacingOccurrences(of: ":", with: "-")
+            destination = directoryURL.appendingPathComponent("cameras.json.bak-\(stamp)")
+        }
+        do {
+            try FileManager.default.moveItem(at: fileURL, to: destination)
+            log.error("cameras.json unreadable (\(reason.localizedDescription, privacy: .public)) — moved to \(destination.lastPathComponent, privacy: .public)")
+            return "Couldn\u{2019}t read cameras.json, so RCam started with no cameras. The file was kept as \(destination.lastPathComponent) — recover it before adding cameras."
+        } catch {
+            log.error("cameras.json unreadable and could not be moved aside: \(error.localizedDescription, privacy: .public)")
+            return "Couldn\u{2019}t read cameras.json (\(reason.localizedDescription)), and it could not be moved aside either. RCam started with no cameras; do not add any until you have copied the file somewhere safe."
+        }
+    }
+
+    private func refreshPersistenceError() {
+        // A failed write is the more urgent of the two.
+        persistenceError = saveError ?? loadError
     }
 
     var selectedCamera: CameraConfig? {
         cameras.first { $0.id == selectedID }
     }
 
+    /// Debounced: `cameras.didSet` fires on every keystroke of every field.
     private func save() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(cameras) {
-            try? data.write(to: Self.fileURL, options: .atomic)
+        pendingSave?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.writeNow() }
+        pendingSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.saveDebounceSeconds, execute: work)
+    }
+
+    /// Write any coalesced edit immediately — on quit, so nothing is lost.
+    func flushPendingSave() {
+        guard pendingSave != nil else { return }
+        pendingSave?.cancel()
+        writeNow()
+    }
+
+    private func writeNow() {
+        pendingSave = nil
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(cameras)
+            try data.write(to: Self.fileURL, options: .atomic)
+            saveError = nil
+        } catch {
+            log.error("saving cameras.json failed: \(error.localizedDescription, privacy: .public)")
+            saveError = "Couldn\u{2019}t save cameras.json: \(error.localizedDescription). Recent changes are not on disk."
         }
     }
 

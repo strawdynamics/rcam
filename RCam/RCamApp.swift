@@ -32,7 +32,14 @@ struct RCamApp: App {
                 }
             }
             Divider()
-            Text(controller.statusText)
+            // A persistence failure outranks the connection status: losing the
+            // camera list is worse than not streaming, and it is the one
+            // problem the user must act on outside RCam.
+            if let error = config.persistenceError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+            } else {
+                Text(controller.statusText)
+            }
             Text("Extension: \(extensionManager.status)")
             Button("Install Extension") {
                 extensionManager.activate()
