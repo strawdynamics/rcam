@@ -77,8 +77,11 @@ enum ProbeDevice {
         let diffs = zip(stats.dropFirst(), stats).map { abs($0.luma - $1.luma) }
         let changed = diffs.filter { $0 > 0.05 }.count
         let meanLuma = stats.map(\.luma).reduce(0, +) / Double(max(stats.count, 1))
-        print(String(format: "frames=%d meanLuma=%.1f changedPairs=%d/%d",
-                     stats.count, meanLuma, changed, max(diffs.count, 1)))
+        let sigChanged = zip(stats.dropFirst(), stats).filter { $0.signature != $1.signature }.count
+        let distinct = Set(stats.map(\.signature)).count
+        print(String(format: "frames=%d meanLuma=%.1f changedPairs=%d/%d distinct=%d sigChanged=%d/%d",
+                     stats.count, meanLuma, changed, max(diffs.count, 1),
+                     distinct, sigChanged, max(diffs.count, 1)))
         if meanLuma < 17 {
             failures.append("frames are essentially black (mean luma \(meanLuma))")
         }
@@ -118,6 +121,12 @@ struct FrameStat {
     let width: Int
     let height: Int
     let luma: Double // mean of sampled Y-plane pixels
+    /// FNV-1a hash of the same sampled Y-plane grid the mean is taken from.
+    /// Mean luma is nearly blind to motion confined to part of the frame (a
+    /// burned-in clock, a person in a doorway) because it averages the change
+    /// away across ~921k pixels. The hash changes if *any* sampled pixel does,
+    /// which is what actually separates a live stream from a frozen one.
+    let signature: UInt64
     let arrival: TimeInterval // epoch seconds
 }
 
@@ -145,13 +154,16 @@ final class FrameCollector: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         let height = CVPixelBufferGetHeight(pixelBuffer)
         var sum = 0.0
         var samples = 0
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325 // FNV-1a offset basis
         if let yBase = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0) {
             let stride = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
             let plane = yBase.assumingMemoryBound(to: UInt8.self)
             for row in Swift.stride(from: 0, to: height, by: 16) {
                 for col in Swift.stride(from: 0, to: width, by: 16) {
-                    sum += Double(plane[row * stride + col])
+                    let value = plane[row * stride + col]
+                    sum += Double(value)
                     samples += 1
+                    hash = (hash ^ UInt64(value)) &* 0x0000_0100_0000_01b3
                 }
             }
         }
@@ -159,6 +171,7 @@ final class FrameCollector: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         stats.append(FrameStat(width: width, height: height,
                                luma: samples > 0 ? sum / Double(samples) : 0,
+                               signature: hash,
                                arrival: Date().timeIntervalSince1970))
         if stats.count >= target {
             semaphore.signal()
