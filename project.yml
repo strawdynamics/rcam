@@ -65,6 +65,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam.extension
         PRODUCT_NAME: com.paulstraw.rcam.extension
+        # Deliberately NOT the app's epoch stamp. This version only changes when
+        # the extension's own inputs change (see scripts/build.sh); re-activating
+        # at an unchanged version is a no-op, which is what keeps the running
+        # extension -- and the "RTSP Camera" device -- alive across a build.
+        CURRENT_PROJECT_VERSION: $(EXTENSION_PROJECT_VERSION)
     entitlements:
       path: RCamExtension/RCamExtension.entitlements
       properties:

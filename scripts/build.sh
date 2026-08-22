@@ -5,8 +5,22 @@
 #   Default configuration is Debug (keeps iteration fast); --release builds and
 #   installs the Release configuration instead.
 #
-# Stamps CFBundleVersion with the current epoch so macOS treats every build's
-# extension as an upgrade (it ignores re-installed extensions at the same version).
+# Versioning: the app and rcamcli get an epoch-stamped CFBundleVersion so every
+# build is distinguishable. The *extension* deliberately does not. macOS ignores
+# a re-activation at the same version, but treats a new version as an upgrade —
+# and an upgrade tears down the running extension, retires the old copy to
+# "terminated waiting to uninstall on reboot", and leaves the virtual camera
+# device missing until the machine is rebooted. Stamping the extension from the
+# clock therefore cost a reboot after *every* build, including builds that only
+# touched app or rcamcli code.
+#
+# So the extension's version is derived from the extension's own inputs
+# (RCamExtension/ plus project.yml, which defines its Info.plist and
+# entitlements) and stored in Configs/extension-version.txt. Unchanged inputs
+# reuse the same version, the activation is a no-op, and the running extension
+# and its device survive the build. Changed inputs bump a monotonic counter --
+# monotonic rather than the hash itself, so that reverting the extension to a
+# previous state is not seen as a version downgrade.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -23,7 +37,43 @@ for arg in "$@"; do
 done
 
 mkdir -p Configs
-echo "CURRENT_PROJECT_VERSION = $(date +%s)" > Configs/Version.xcconfig
+
+# Hash everything the extension is built from.
+EXTENSION_INPUT_HASH="$(
+  { find RCamExtension -type f -print0 | sort -z | xargs -0 shasum -a 256
+    shasum -a 256 project.yml
+  } | shasum -a 256 | cut -d' ' -f1
+)"
+
+EXTENSION_STATE=Configs/extension-version.txt
+PREVIOUS_HASH=""
+PREVIOUS_VERSION=0
+if [[ -f "$EXTENSION_STATE" ]]; then
+  read -r PREVIOUS_HASH PREVIOUS_VERSION < "$EXTENSION_STATE" || true
+else
+  # No state yet, but a previously-installed extension may carry a much larger
+  # version (this scheme replaced an epoch stamp). Seed above it: macOS refuses
+  # to activate a lower version than the one already installed.
+  INSTALLED_EXTENSION_PLIST=/Applications/RCam.app/Contents/Library/SystemExtensions/com.paulstraw.rcam.extension.systemextension/Contents/Info.plist
+  if [[ -f "$INSTALLED_EXTENSION_PLIST" ]]; then
+    PREVIOUS_VERSION="$(defaults read "${INSTALLED_EXTENSION_PLIST%.plist}" CFBundleVersion 2>/dev/null || echo 0)"
+    [[ "$PREVIOUS_VERSION" =~ ^[0-9]+$ ]] || PREVIOUS_VERSION=0
+  fi
+fi
+
+if [[ "$EXTENSION_INPUT_HASH" == "$PREVIOUS_HASH" ]]; then
+  EXTENSION_VERSION="$PREVIOUS_VERSION"
+  EXTENSION_CHANGED=no
+else
+  EXTENSION_VERSION=$((PREVIOUS_VERSION + 1))
+  EXTENSION_CHANGED=yes
+fi
+printf '%s %s\n' "$EXTENSION_INPUT_HASH" "$EXTENSION_VERSION" > "$EXTENSION_STATE"
+
+{
+  echo "CURRENT_PROJECT_VERSION = $(date +%s)"
+  echo "EXTENSION_PROJECT_VERSION = $EXTENSION_VERSION"
+} > Configs/Version.xcconfig
 
 xcodegen generate
 
@@ -44,3 +94,15 @@ ditto "$APP_SRC" /Applications/RCam.app
 
 INSTALLED_VERSION="$(defaults read /Applications/RCam.app/Contents/Info CFBundleVersion)"
 echo "Installed /Applications/RCam.app from ${APP_SRC} (${CONFIGURATION}, CFBundleVersion ${INSTALLED_VERSION})"
+
+if [[ "$EXTENSION_CHANGED" == yes ]]; then
+  cat >&2 <<'WARNING'
+
+  ⚠️  The system extension changed, so this build is an UPGRADE.
+      macOS will tear down the running extension and defer the old copy's
+      uninstall to the next reboot. Expect "RTSP Camera" to go missing:
+      quit and relaunch RCam, and if the device does not come back, reboot.
+WARNING
+else
+  echo "Extension unchanged (version ${EXTENSION_VERSION}) — re-activation is a no-op, the virtual device should survive this build."
+fi

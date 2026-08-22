@@ -4,6 +4,7 @@ DerivedData/
 vendor/ffmpeg/src/
 RCam.xcodeproj/
 Configs/Version.xcconfig
+Configs/extension-version.txt
 *.xcuserdata/
 *.xcuserdatad/
 .testrig/
