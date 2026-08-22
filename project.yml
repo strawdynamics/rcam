@@ -2,7 +2,7 @@ name: RCam
 options:
   bundleIdPrefix: com.paulstraw
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "15.0"
   createIntermediateGroups: true
 
 settings:
@@ -12,6 +12,13 @@ settings:
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.1.0"
     ARCHS: arm64
+
+settingGroups:
+  ffmpeg:
+    SWIFT_INCLUDE_PATHS: $(SRCROOT)/RCamKit/CFFmpeg
+    HEADER_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/include
+    LIBRARY_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/lib
+    OTHER_LDFLAGS: "-lavformat -lavcodec -lavutil"
 
 configFiles:
   Debug: Configs/Version.xcconfig
@@ -26,12 +33,9 @@ targets:
       - path: RCamKit
         excludes: ["CFFmpeg/**"]
     settings:
+      groups: [ffmpeg]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam
-        SWIFT_INCLUDE_PATHS: $(SRCROOT)/RCamKit/CFFmpeg
-        HEADER_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/include
-        LIBRARY_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/lib
-        OTHER_LDFLAGS: "-lavformat -lavcodec -lavutil"
     entitlements:
       path: RCam/RCam.entitlements
       properties:
@@ -88,12 +92,9 @@ targets:
       - path: RCamKit
         excludes: ["CFFmpeg/**"]
     settings:
+      groups: [ffmpeg]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam.cli
-        SWIFT_INCLUDE_PATHS: $(SRCROOT)/RCamKit/CFFmpeg
-        HEADER_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/include
-        LIBRARY_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/lib
-        OTHER_LDFLAGS: "-lavformat -lavcodec -lavutil"
         # Embed an Info.plist section so TCC can attribute the camera-access
         # request to this binary (required for probe-device).
         GENERATE_INFOPLIST_FILE: YES
