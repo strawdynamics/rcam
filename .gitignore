@@ -9,3 +9,5 @@ Configs/Version.xcconfig
 .testrig/
 .claude/scheduled_tasks.lock
 *.blend1
+auto.crt
+auto.key

@@ -143,11 +143,11 @@ extracting them is self-contained.
 No behavior change. Gets `project.yml` and the build script right once, before
 any code milestone edits them.
 
-- [ ] `git checkout -b review-fixes`. All subsequent work happens on `review-fixes`.
-- [ ] Remove the committed key: `git rm auto.crt auto.key`, and add `auto.crt` / `auto.key` to `.gitignore`. No history rewrite.
-- [ ] `project.yml`: `deploymentTarget.macOS` → `"15.0"`.
-- [ ] `project.yml`: collapse the duplicated FFmpeg settings into a `settingGroups` entry (`ffmpeg`: `SWIFT_INCLUDE_PATHS`, `HEADER_SEARCH_PATHS`, `LIBRARY_SEARCH_PATHS`, `OTHER_LDFLAGS`) and reference it from `RCam` and `rcamcli` via `settings.groups`.
-- [ ] `scripts/build.sh`: accept `--release`. One `CONFIGURATION` variable must drive both `xcodebuild` invocations *and* the `APP_SRC` product path (the current script hardcodes `Debug` in three places). Default stays `Debug`. Echo which configuration was installed.
+- [x] `git checkout -b review-fixes`. All subsequent work happens on `review-fixes`.
+- [x] Remove the committed key: `git rm auto.crt auto.key`, and add `auto.crt` / `auto.key` to `.gitignore`. No history rewrite.
+- [x] `project.yml`: `deploymentTarget.macOS` → `"15.0"`.
+- [x] `project.yml`: collapse the duplicated FFmpeg settings into a `settingGroups` entry (`ffmpeg`: `SWIFT_INCLUDE_PATHS`, `HEADER_SEARCH_PATHS`, `LIBRARY_SEARCH_PATHS`, `OTHER_LDFLAGS`) and reference it from `RCam` and `rcamcli` via `settings.groups`.
+- [x] `scripts/build.sh`: accept `--release`. One `CONFIGURATION` variable must drive both `xcodebuild` invocations *and* the `APP_SRC` product path (the current script hardcodes `Debug` in three places). Default stays `Debug`. Echo which configuration was installed.
 
 **Verify**: `git ls-files | grep -c 'auto\.\(crt\|key\)'` is `0` and both files are gone from the working tree; `git check-ignore auto.key` succeeds. `scripts/build.sh` exits 0 and `defaults read /Applications/RCam.app/Contents/Info LSMinimumSystemVersion` prints `15.0`. `scripts/build.sh --release` exits 0 and installs from `build/Build/Products/Release/`. `git diff` on the regenerated project shows the FFmpeg flags still present on both targets. Commit.
 
@@ -252,10 +252,15 @@ Diagnostics: `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info`
 
 ## State
 
-**Current milestone**: **F0 — Repo hygiene and project configuration** (nothing started)
+**Current milestone**: **F1 — Extract the pure parsers and stand up tests** (nothing started)
+
+F0 complete. Notes carried forward:
+- The git housekeeping from the earlier draft (commit the `loops/` move, fast-forward `main` to `app-icon`) was already done before this loop started: `main` already contained it, and `app-icon` is now a stale duplicate that differs from `main` only in this doc. `review-fixes` was branched from `main` at `cf4c3b9`.
+- `auto.crt` / `auto.key` are untracked, gitignored, and deleted from the working tree. No history rewrite, nothing pushed.
+- `scripts/build.sh [--release|--debug]`; one `CONFIGURATION` variable drives both `xcodebuild` calls and `APP_SRC`. Debug is installed right now.
 
 **Blockers**: none
 
 ### Iteration Log
 
-(append one line per iteration)
+- 2026-08-21 F0: branched `review-fixes`; removed + gitignored `auto.crt`/`auto.key`; deployment target 14.0→15.0; FFmpeg build settings collapsed into a `settingGroups: ffmpeg` referenced by `RCam` and `rcamcli`; `build.sh` gained `--release`. Verified: 0 tracked key files, `git check-ignore` passes both, Debug and Release builds each exit 0 and install from their own product dir, `LSMinimumSystemVersion` = 15.0, FFmpeg flags still present on both targets × both configs in the regenerated pbxproj. Debug reinstalled last.
