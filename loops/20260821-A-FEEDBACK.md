@@ -156,14 +156,14 @@ any code milestone edits them.
 Tests land **before** the decode-path surgery in F2, so the riskiest change has a
 safety net.
 
-- [ ] New `RCamKit/H264Bitstream.swift` — Foundation only, **no `import CFFmpeg`**. Move `ParameterSets`, `parseParameterSets`, `parseAVCC`, `parseAnnexBParameterSets`, `annexBNALUnits`, and `annexBToLengthPrefixed` out of `RTSPSource` into an `enum H264Bitstream` namespace. Make `ParameterSets` `Equatable` (F2 needs it to detect changes). Keep `parseParameterSets`'s `UnsafeMutablePointer<UInt8>?` signature — it is fed `codecpar.extradata` directly.
-- [ ] New `RCamKit/StreamHealth.swift` — Foundation only. Two pure pieces:
+- [x] New `RCamKit/H264Bitstream.swift` — Foundation only, **no `import CFFmpeg`**. Move `ParameterSets`, `parseParameterSets`, `parseAVCC`, `parseAnnexBParameterSets`, `annexBNALUnits`, and `annexBToLengthPrefixed` out of `RTSPSource` into an `enum H264Bitstream` namespace. Make `ParameterSets` `Equatable` (F2 needs it to detect changes). Keep `parseParameterSets`'s `UnsafeMutablePointer<UInt8>?` signature — it is fed `codecpar.extradata` directly.
+- [x] New `RCamKit/StreamHealth.swift` — Foundation only. Two pure pieces:
   - `DecodeFailureCounter` — `init(threshold:)`, `mutating func record(success: Bool) -> Bool` returning `true` exactly once when the run of failures reaches the threshold, resetting on success.
   - `streamLabel(forURL:)` — strips userinfo and returns `host:port/path` (no scheme-level credentials, no query). This is what F2 puts in the thread name; it must be impossible for a password to survive it.
-- [ ] Update `RTSPSource` to call through to the moved code. Nothing else in the tree references these functions, so no other call sites change.
-- [ ] `project.yml`: new `RCamTests` target, `type: bundle.unit-test`, platform macOS, sources = `RCamTests/` plus **only** `RCamKit/H264Bitstream.swift` and `RCamKit/StreamHealth.swift`. No FFmpeg group, no test host. Add a `test:` action to the `RCam` scheme covering it.
-- [ ] `RCamTests/` using **Swift Testing** (`import Testing`). Cover, at minimum: a well-formed avcC; avcC truncated at each early-return branch (`size > 7`, the SPS length reads, the `offset < size` boundary before the PPS count, the PPS length reads); annex-B with 3-byte and 4-byte start codes intermixed; annex-B missing SPS, missing PPS, and with neither; zero-size and nil input; `annexBToLengthPrefixed` dropping NAL types 7/8/9/12 while keeping slices and emitting big-endian 4-byte lengths; a trailing NAL with no following start code; `DecodeFailureCounter` firing exactly once at the threshold and resetting on success; `streamLabel(forURL:)` stripping `user:password@` from a realistic RTSP URL.
-- [ ] `scripts/test.sh` — `xcodebuild test -project RCam.xcodeproj -scheme RCam -derivedDataPath build`.
+- [x] Update `RTSPSource` to call through to the moved code. Nothing else in the tree references these functions, so no other call sites change.
+- [x] `project.yml`: new `RCamTests` target, `type: bundle.unit-test`, platform macOS, sources = `RCamTests/` plus **only** `RCamKit/H264Bitstream.swift` and `RCamKit/StreamHealth.swift`. No FFmpeg group, no test host. Add a `test:` action to the `RCam` scheme covering it.
+- [x] `RCamTests/` using **Swift Testing** (`import Testing`). Cover, at minimum: a well-formed avcC; avcC truncated at each early-return branch (`size > 7`, the SPS length reads, the `offset < size` boundary before the PPS count, the PPS length reads); annex-B with 3-byte and 4-byte start codes intermixed; annex-B missing SPS, missing PPS, and with neither; zero-size and nil input; `annexBToLengthPrefixed` dropping NAL types 7/8/9/12 while keeping slices and emitting big-endian 4-byte lengths; a trailing NAL with no following start code; `DecodeFailureCounter` firing exactly once at the threshold and resetting on success; `streamLabel(forURL:)` stripping `user:password@` from a realistic RTSP URL.
+- [x] `scripts/test.sh` — `xcodebuild test -project RCam.xcodeproj -scheme RCam -derivedDataPath build`.
 
 **Verify**: `scripts/test.sh` exits 0 with every test passing; deliberately break one assertion and confirm the script exits non-zero (a test target that silently runs nothing is the classic failure here). `scripts/build.sh` exits 0 — `RTSPSource` still compiles against the moved code. `rcamcli capture rtsp://127.0.0.1:8554/test --seconds 5 --out /tmp/f1` (rig started first) still yields animating 1280x720 PNGs, proving the extraction was behavior-preserving. Stop the rig. Commit.
 
@@ -252,15 +252,22 @@ Diagnostics: `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info`
 
 ## State
 
-**Current milestone**: **F1 — Extract the pure parsers and stand up tests** (nothing started)
+**Current milestone**: **F2 — RTSPSource: credentials, reconfiguration, teardown (findings 2, 3, 4)** (nothing started)
 
 F0 complete. Notes carried forward:
 - The git housekeeping from the earlier draft (commit the `loops/` move, fast-forward `main` to `app-icon`) was already done before this loop started: `main` already contained it, and `app-icon` is now a stale duplicate that differs from `main` only in this doc. `review-fixes` was branched from `main` at `cf4c3b9`.
 - `auto.crt` / `auto.key` are untracked, gitignored, and deleted from the working tree. No history rewrite, nothing pushed.
 - `scripts/build.sh [--release|--debug]`; one `CONFIGURATION` variable drives both `xcodebuild` calls and `APP_SRC`. Debug is installed right now.
 
+F1 complete. Notes carried forward:
+- `H264Bitstream` (enum namespace) and `StreamHealth` (enum namespace, holding `DecodeFailureCounter` and `streamLabel(forURL:)`) are in `RCamKit/`, Foundation-only. `ParameterSets` is now `Equatable` and nested in `H264Bitstream`, ready for F2's change detection.
+- `RCamTests` needed `GENERATE_INFOPLIST_FILE: YES` (plus a bundle id) or the host-less test bundle fails to code sign. Not in the original task text; recorded here so a regenerate doesn't lose it.
+- The tests found a real bug while being written: `URLComponents(string: "rtsp://")` returns a **non-nil, empty** host, so `streamLabel` returned `""` instead of taking the redacting fallback. Fixed with an `!host.isEmpty` check.
+- 42 tests in 6 suites. F2 should extend `DecodeFailureCounter` coverage only if its semantics change; the threshold-30 case is already pinned.
+
 **Blockers**: none
 
 ### Iteration Log
 
 - 2026-08-21 F0: branched `review-fixes`; removed + gitignored `auto.crt`/`auto.key`; deployment target 14.0→15.0; FFmpeg build settings collapsed into a `settingGroups: ffmpeg` referenced by `RCam` and `rcamcli`; `build.sh` gained `--release`. Verified: 0 tracked key files, `git check-ignore` passes both, Debug and Release builds each exit 0 and install from their own product dir, `LSMinimumSystemVersion` = 15.0, FFmpeg flags still present on both targets × both configs in the regenerated pbxproj. Debug reinstalled last.
+- 2026-08-21 F1: extracted the pure parsers into `RCamKit/H264Bitstream.swift` and the new health helpers into `RCamKit/StreamHealth.swift` (both Foundation-only); `RTSPSource` now calls through. Added the `RCamTests` unit-test target (no FFmpeg group, no test host) plus a `test:` action on the RCam scheme, 42 Swift Testing cases, and `scripts/test.sh`. Verified: `scripts/test.sh` exits 0 with 42/42 passing; a deliberately broken assertion makes it exit 65 (so the target is genuinely running tests, not silently passing); `scripts/build.sh` exits 0; `rcamcli capture rtsp://127.0.0.1:8554/test --seconds 5` against the rig gave 133 animating 1280x720 frames. Rig stopped.

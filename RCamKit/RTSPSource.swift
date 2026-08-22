@@ -146,7 +146,7 @@ public final class RTSPSource: FrameSource {
         }
 
         // SPS/PPS: usually in extradata for RTSP (from the SDP).
-        var parameterSets = Self.parseParameterSets(
+        var parameterSets = H264Bitstream.parseParameterSets(
             data: codecParameters.pointee.extradata,
             size: Int(codecParameters.pointee.extradata_size)
         )
@@ -177,7 +177,7 @@ public final class RTSPSource: FrameSource {
             // In-band SPS/PPS (annex-B) — needed if the SDP had none, and
             // keeps us current if the camera re-sends them.
             if parameterSets == nil {
-                parameterSets = Self.parseAnnexBParameterSets(data: packetData, size: packetSize)
+                parameterSets = H264Bitstream.parseAnnexBParameterSets(data: packetData, size: packetSize)
             }
             guard let sets = parameterSets else { continue }
 
@@ -281,7 +281,7 @@ public final class RTSPSource: FrameSource {
     private func decodePacket(data: UnsafePointer<UInt8>, size: Int) -> CVPixelBuffer? {
         guard let session = decompressionSession,
               let formatDescription,
-              let converted = Self.annexBToLengthPrefixed(data: data, size: size),
+              let converted = H264Bitstream.annexBToLengthPrefixed(data: data, size: size),
               !converted.isEmpty else { return nil }
 
         var blockBuffer: CMBlockBuffer?
@@ -348,109 +348,6 @@ public final class RTSPSource: FrameSource {
                                                   from: decoded,
                                                   to: output) == noErr else { return nil }
         return output
-    }
-
-    // MARK: - H.264 bitstream helpers
-
-    struct ParameterSets {
-        let sps: [UInt8]
-        let pps: [UInt8]
-    }
-
-    /// Extradata is either avcC (starts with 0x01) or annex-B.
-    static func parseParameterSets(data: UnsafeMutablePointer<UInt8>?, size: Int) -> ParameterSets? {
-        guard let data, size > 0 else { return nil }
-        if data[0] == 1 {
-            return parseAVCC(data: data, size: size)
-        }
-        return parseAnnexBParameterSets(data: data, size: size)
-    }
-
-    static func parseAVCC(data: UnsafePointer<UInt8>, size: Int) -> ParameterSets? {
-        guard size > 7 else { return nil }
-        var offset = 5
-        var sps: [UInt8]?
-        var pps: [UInt8]?
-
-        let spsCount = Int(data[offset] & 0x1F)
-        offset += 1
-        for _ in 0..<spsCount {
-            guard offset + 2 <= size else { return nil }
-            let length = Int(data[offset]) << 8 | Int(data[offset + 1])
-            offset += 2
-            guard offset + length <= size else { return nil }
-            if sps == nil { sps = Array(UnsafeBufferPointer(start: data + offset, count: length)) }
-            offset += length
-        }
-        guard offset < size else { return nil }
-        let ppsCount = Int(data[offset])
-        offset += 1
-        for _ in 0..<ppsCount {
-            guard offset + 2 <= size else { return nil }
-            let length = Int(data[offset]) << 8 | Int(data[offset + 1])
-            offset += 2
-            guard offset + length <= size else { return nil }
-            if pps == nil { pps = Array(UnsafeBufferPointer(start: data + offset, count: length)) }
-            offset += length
-        }
-        guard let sps, let pps else { return nil }
-        return ParameterSets(sps: sps, pps: pps)
-    }
-
-    static func parseAnnexBParameterSets(data: UnsafePointer<UInt8>, size: Int) -> ParameterSets? {
-        var sps: [UInt8]?
-        var pps: [UInt8]?
-        for unit in annexBNALUnits(data: data, size: size) {
-            guard unit.count > 0 else { continue }
-            switch unit[0] & 0x1F {
-            case 7: if sps == nil { sps = unit }
-            case 8: if pps == nil { pps = unit }
-            default: break
-            }
-        }
-        guard let sps, let pps else { return nil }
-        return ParameterSets(sps: sps, pps: pps)
-    }
-
-    /// Split an annex-B buffer into NAL unit payloads (start codes stripped).
-    static func annexBNALUnits(data: UnsafePointer<UInt8>, size: Int) -> [[UInt8]] {
-        var units = [[UInt8]]()
-        var nalStart: Int?
-        var index = 0
-        while index + 2 < size {
-            if data[index] == 0, data[index + 1] == 0, data[index + 2] == 1 {
-                if let start = nalStart {
-                    var end = index
-                    if end > start, data[end - 1] == 0 { end -= 1 } // 4-byte start code
-                    units.append(Array(UnsafeBufferPointer(start: data + start, count: end - start)))
-                }
-                index += 3
-                nalStart = index
-            } else {
-                index += 1
-            }
-        }
-        if let start = nalStart, start < size {
-            units.append(Array(UnsafeBufferPointer(start: data + start, count: size - start)))
-        }
-        return units
-    }
-
-    /// Annex-B → 4-byte-length-prefixed (AVCC) for VideoToolbox.
-    static func annexBToLengthPrefixed(data: UnsafePointer<UInt8>, size: Int) -> [UInt8]? {
-        let units = annexBNALUnits(data: data, size: size)
-        guard !units.isEmpty else { return nil }
-        var out = [UInt8]()
-        out.reserveCapacity(size + 8)
-        for unit in units {
-            // Skip parameter/filler units VT doesn't want mid-sample; keep slices.
-            let type = unit.first.map { $0 & 0x1F } ?? 0
-            guard type != 7, type != 8, type != 9, type != 12 else { continue }
-            let length = UInt32(unit.count).bigEndian
-            withUnsafeBytes(of: length) { out.append(contentsOf: $0) }
-            out.append(contentsOf: unit)
-        }
-        return out
     }
 
     // MARK: - Misc
