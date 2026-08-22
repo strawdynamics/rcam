@@ -45,9 +45,7 @@ struct RCamApp: App {
                 extensionManager.activate()
             }
             Divider()
-            SettingsLink {
-                Text("Settings…")
-            }
+            SettingsMenuButton()
             Button("Quit RCam") {
                 NSApplication.shared.terminate(nil)
             }
@@ -61,6 +59,29 @@ struct RCamApp: App {
 
         Settings {
             SettingsView(config: config, controller: controller)
+        }
+    }
+}
+
+/// Opening Settings from the menu bar.
+///
+/// RCam is an `LSUIElement` app, so clicking the menu bar item does not activate
+/// it: SwiftUI orders the Settings window in while the app the user came from
+/// keeps focus, leaving Settings open but buried. Activating RCam and making the
+/// window key is what actually brings it forward.
+struct SettingsMenuButton: View {
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Button("Settings…") {
+            openSettings()
+            // `ignoringOtherApps` is required, deprecation notwithstanding: the
+            // modern NSApp.activate() defers to the app that already has focus,
+            // which is exactly the app we are trying to come forward over.
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows
+                .first { $0.identifier?.rawValue == "com_apple_SwiftUI_Settings_window" }?
+                .makeKeyAndOrderFront(nil)
         }
     }
 }
