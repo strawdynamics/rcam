@@ -15,7 +15,7 @@ struct RCamApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("RCam", systemImage: "video.fill") {
+        MenuBarExtra {
             if config.cameras.isEmpty {
                 Text("No cameras — add one in Settings")
             } else {
@@ -51,6 +51,12 @@ struct RCamApp: App {
             Button("Quit RCam") {
                 NSApplication.shared.terminate(nil)
             }
+        } label: {
+            // The filled variant is the "on air" state: RCam is loudest in the
+            // menu bar exactly while it is feeding the virtual camera.
+            Image(controller.streamingCameraID != nil
+                  ? "rcam.connector.fill" : "rcam.connector")
+                .accessibilityLabel("RCam")
         }
 
         Settings {
