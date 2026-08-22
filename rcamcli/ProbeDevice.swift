@@ -60,7 +60,7 @@ enum ProbeDevice {
         }
         if dumpLuma {
             for (index, stat) in collector.stats.enumerated() {
-                print(String(format: "luma[%d]=%.1f t=%.3f", index, stat.luma, stat.arrival))
+                print(String(format: "luma[%d]=%.1f sig=%016llx t=%.3f", index, stat.luma, stat.signature, stat.arrival))
             }
         }
         return assess(stats: collector.stats, frameTarget: frameTarget)
@@ -74,28 +74,86 @@ enum ProbeDevice {
         if let bad = stats.first(where: { $0.width != 1280 || $0.height != 720 }) {
             failures.append("unexpected dimensions \(bad.width)x\(bad.height), wanted 1280x720")
         }
-        let diffs = zip(stats.dropFirst(), stats).map { abs($0.luma - $1.luma) }
-        let changed = diffs.filter { $0 > 0.05 }.count
+        let pairCount = max(stats.count - 1, 1)
+        let signatures = stats.map(\.signature)
         let meanLuma = stats.map(\.luma).reduce(0, +) / Double(max(stats.count, 1))
-        let sigChanged = zip(stats.dropFirst(), stats).filter { $0.signature != $1.signature }.count
-        let distinct = Set(stats.map(\.signature)).count
-        print(String(format: "frames=%d meanLuma=%.1f changedPairs=%d/%d distinct=%d sigChanged=%d/%d",
-                     stats.count, meanLuma, changed, max(diffs.count, 1),
-                     distinct, sigChanged, max(diffs.count, 1)))
+        let sigChanged = zip(signatures.dropFirst(), signatures).filter { $0 != $1 }.count
+        let distinct = Set(signatures).count
+        let longestStaticRun = longestRepeatRun(signatures)
+        let span = (stats.last?.arrival ?? 0) - (stats.first?.arrival ?? 0)
+        let fps = span > 0 ? Double(stats.count - 1) / span : 0
+        let runLimit = staticRunLimit(frameCount: stats.count)
+        let distinctFloor = max(2, stats.count / 10)
+        print(String(format: "frames=%d fps=%.1f meanLuma=%.1f distinct=%d sigChanged=%d/%d longestStaticRun=%d (limits: run<%d distinct>=%d)",
+                     stats.count, fps, meanLuma, distinct, sigChanged, pairCount,
+                     longestStaticRun, runLimit, distinctFloor))
         if meanLuma < 17 {
             failures.append("frames are essentially black (mean luma \(meanLuma))")
         }
-        if changed < max(1, diffs.count / 4) {
-            failures.append("content not animating (only \(changed)/\(diffs.count) frame pairs differ)")
+        if longestStaticRun >= runLimit {
+            failures.append("content frozen: \(longestStaticRun) consecutive identical frames (limit \(runLimit)) — "
+                            + "a frozen placeholder or a held last-good frame, not a live stream")
+        }
+        if distinct < distinctFloor {
+            failures.append("only \(distinct) distinct frames in \(stats.count) (want >= \(distinctFloor)) — "
+                            + "the device is cycling a few cached buffers, not streaming")
         }
         if failures.isEmpty {
-            print("OK: \(stats.count) frames, 1280x720, animating")
+            print("OK: \(stats.count) frames, 1280x720, live")
             return 0
+        }
+        if longestStaticRun >= runLimit || distinct < distinctFloor {
+            fputs("note: probe-device is usually the device's only client, so it cold-starts the RTSP\n"
+                  + "      connect and reads the placeholder for the first second or two. Run a throwaway\n"
+                  + "      `probe-device --frames 300` first, then re-run this within the 10s unwatched grace.\n",
+                  stderr)
         }
         for failure in failures {
             fputs("FAIL: \(failure)\n", stderr)
         }
         return 3
+    }
+
+    /// Frames of unbroken repetition that count as "frozen".
+    ///
+    /// Measured ground truth at 1280x720/30fps (2026-08-22, 300-frame samples):
+    ///
+    ///   frozen "No signal" placeholder   distinct=1     longestStaticRun=300 (the whole sample)
+    ///   live rig (testsrc, 30fps)        distinct=262   longestStaticRun=1-2
+    ///   live real camera (~15fps source) distinct=140   longestStaticRun=7
+    ///
+    /// The real camera is the binding case: it feeds a 30fps output tick at
+    /// about 15fps, so roughly every other emitted frame is a legitimate
+    /// repeat. That is why this is a *run-length* test and not a fraction —
+    /// a fraction test has to sit below the real camera's ~46% changed pairs,
+    /// which leaves it nearly as blind as the mean-luma test it replaces.
+    /// Run length is independent of the source frame rate: halving the source
+    /// rate doubles the run length, it does not approach the sample size.
+    ///
+    /// 30 frames is 1s at 30fps — over 4x the worst live measurement and a
+    /// tenth of the frozen one. Capped at half the sample so that a short
+    /// probe (the 30-frame default) still fails when it is frozen throughout.
+    private static func staticRunLimit(frameCount: Int) -> Int {
+        min(30, max(2, frameCount / 2))
+    }
+
+    /// Longest run of consecutive frames carrying the same signature, in frames.
+    /// A frozen source gives a run equal to the whole sample; a live source
+    /// gives short runs from the occasional repeated tick.
+    private static func longestRepeatRun(_ signatures: [UInt64]) -> Int {
+        var longest = 0
+        var current = 0
+        var previous: UInt64?
+        for signature in signatures {
+            if signature == previous {
+                current += 1
+            } else {
+                current = 1
+                previous = signature
+            }
+            longest = max(longest, current)
+        }
+        return longest
     }
 
     private static func requestCameraAccess() -> Bool {
