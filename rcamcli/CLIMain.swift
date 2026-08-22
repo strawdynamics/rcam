@@ -35,6 +35,24 @@ struct CLIMain {
                 outDir = args[index + 1]
             }
             exit(CaptureCommand.run(url: url, seconds: seconds, outDir: outDir))
+        case "stress":
+            guard let url = args.first else {
+                usage()
+                exit(64)
+            }
+            args.removeFirst()
+            var cycles = 50
+            var hold = 0.4
+            if let index = args.firstIndex(of: "--cycles"), index + 1 < args.count,
+               let value = Int(args[index + 1]) {
+                cycles = value
+            }
+            if let index = args.firstIndex(of: "--hold"), index + 1 < args.count,
+               let value = Double(args[index + 1]) {
+                hold = value
+            }
+            exit(StressCommand.run(url: url, cycles: cycles, hold: hold,
+                                   reuse: args.contains("--reuse")))
         case "select-camera":
             guard let key = args.first else {
                 usage()
@@ -73,6 +91,8 @@ struct CLIMain {
         usage: rcamcli <command>
           probe-device [--frames N]                       assert "RTSP Camera" exists and animates (default 30)
           capture <rtsp-url> [--seconds N] [--out <dir>]  decode RTSP, save every 30th frame as PNG
+          stress <rtsp-url> [--cycles N] [--hold S] [--reuse]
+                                                          start/stop RTSPSource repeatedly (teardown race check)
           select-camera <name-or-id>                      switch RCam's active camera (via distributed notification)
           cmio-props                                      dump the virtual device's custom properties
         """)
