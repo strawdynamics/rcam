@@ -11,6 +11,23 @@ import os.log
 /// disconnect), and performs overlap switching: the old source keeps feeding
 /// the sink (with a "Connecting…" badge signaled to the extension) until the
 /// new source delivers its first frame.
+///
+/// **Threading contract.** Two disciplines, deliberately:
+///
+/// - *Main-thread only*: `unwatchedSince`, `backoffSeconds`,
+///   `nextReconnectAllowed`, `asleep`, `statusText`, `streamingCameraID` and
+///   `lastPollDiagnostic`. They are touched by the poll timer, by `select`,
+///   and by the `onStateChange` handler in `makeSource`, all of which run on
+///   main — the handler hops there explicitly before doing anything.
+/// - *Guarded by `switchLock`*: `activeSource` and `pendingSource`, the only
+///   two members the decode thread also reaches. Every read and write of them
+///   takes the lock, including the identity checks in `onFrame`.
+///
+/// `completeSwitch` and `setSwitching` are called from the decode thread on
+/// purpose: promoting the pending source has to happen on the frame that
+/// proves it is alive, not a poll tick later. They confine themselves to
+/// `switchLock`-guarded state and CMIO property writes, and hop to main for
+/// anything published.
 final class RCamController: ObservableObject {
     static let unwatchedGrace: TimeInterval = 10
     static let selectNotification = Notification.Name("com.paulstraw.rcam.selectCamera")
@@ -118,13 +135,26 @@ final class RCamController: ObservableObject {
 
     /// User (or scripted) camera selection.
     func select(_ camera: CameraConfig) {
-        guard camera.id != config.selectedID || activeSource == nil else { return }
-        log.info("selecting camera \(camera.name, privacy: .public)")
-        config.selectedID = camera.id
-
         switchLock.lock()
         let streamingNow = activeSource != nil
         switchLock.unlock()
+
+        // Re-picking the camera that just failed is meaningful: it is nil'd
+        // from `activeSource` on failure, so `!streamingNow` lets it through.
+        guard camera.id != config.selectedID || !streamingNow else { return }
+        log.info("selecting camera \(camera.name, privacy: .public)")
+        config.selectedID = camera.id
+
+        // Finding 8: an explicit user action is a strong signal — it should
+        // never wait out a backoff that may have grown to 30s. Reset it so the
+        // next 1s poll reconnects immediately.
+        let pendingBackoff = max(0, nextReconnectAllowed.timeIntervalSinceNow)
+        if pendingBackoff > 0 {
+            log.info("user selection clears \(pendingBackoff, format: .fixed(precision: 1))s of remaining reconnect backoff")
+        }
+        backoffSeconds = 1
+        nextReconnectAllowed = .distantPast
+
         if streamingNow {
             beginSwitch(to: camera)
         }
