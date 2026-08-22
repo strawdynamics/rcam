@@ -182,9 +182,9 @@ struct CamerasPane: View {
         if config.cameras.isEmpty {
             EmptyCamerasView(addCamera: addCamera)
         } else if let id = editingID,
-                  let index = config.cameras.firstIndex(where: { $0.id == id }) {
+                  config.cameras.contains(where: { $0.id == id }) {
             CameraEditor(config: config,
-                         index: index,
+                         cameraID: id,
                          isLive: controller.streamingCameraID == id,
                          isSelected: config.selectedID == id)
                 .id(id)
@@ -278,7 +278,7 @@ struct EmptyCamerasView: View {
 
 struct CameraEditor: View {
     @ObservedObject var config: ConfigStore
-    let index: Int
+    let cameraID: UUID
     let isLive: Bool
     let isSelected: Bool
 
@@ -302,7 +302,40 @@ struct CameraEditor: View {
         var info: RTSPSource.StreamInfo?
     }
 
+    /// The camera being edited, resolved by id on every access. An index
+    /// into `config.cameras` cannot be trusted here: SwiftUI re-runs this
+    /// body on the same `config` change that removed the camera, and a
+    /// just-added camera is always the last element — so its index is out of
+    /// bounds the moment it is deleted, and every other deletion shifts the
+    /// editor onto the wrong camera.
+    private var camera: CameraConfig {
+        config.cameras.first { $0.id == cameraID } ?? CameraConfig()
+    }
+
+    /// A binding to one field of this camera, resolved by id at both ends.
+    /// A write aimed at a camera that has since been deleted is dropped
+    /// rather than landing on whatever took its place.
+    private func field<V>(_ keyPath: WritableKeyPath<CameraConfig, V>) -> Binding<V> {
+        Binding(
+            get: { self.camera[keyPath: keyPath] },
+            set: { newValue in
+                guard let i = self.config.cameras.firstIndex(where: { $0.id == self.cameraID })
+                else { return }
+                self.config.cameras[i][keyPath: keyPath] = newValue
+            }
+        )
+    }
+
+    @ViewBuilder
     var body: some View {
+        // Gone already: the parent drops this editor on the same update, but
+        // this body can run first.
+        if config.cameras.contains(where: { $0.id == cameraID }) {
+            editor
+        }
+    }
+
+    private var editor: some View {
         VStack(spacing: 0) {
             header
             Divider()
@@ -316,11 +349,11 @@ struct CameraEditor: View {
         .onAppear {
             guard !credsLoaded else { return }
             credsLoaded = true
-            if let creds = KeychainStore.read(cameraID: config.cameras[index].id) {
+            if let creds = KeychainStore.read(cameraID: cameraID) {
                 username = creds.username
                 password = creds.password
             }
-            credsSavedAt = KeychainStore.savedAt(cameraID: config.cameras[index].id)
+            credsSavedAt = KeychainStore.savedAt(cameraID: cameraID)
         }
     }
 
@@ -336,10 +369,10 @@ struct CameraEditor: View {
                         .foregroundStyle(Color.accentColor)
                 }
             VStack(alignment: .leading, spacing: 2) {
-                if config.cameras[index].name.isEmpty {
+                if camera.name.isEmpty {
                     Text("Untitled").font(.headline).italic().foregroundStyle(.secondary)
                 } else {
-                    Text(config.cameras[index].name).font(.headline)
+                    Text(camera.name).font(.headline)
                 }
                 Text(headerSubtitle)
                     .font(.caption)
@@ -377,11 +410,11 @@ struct CameraEditor: View {
 
     private var cameraSection: some View {
         Section("Camera") {
-            TextField("Name", text: $config.cameras[index].name,
+            TextField("Name", text: field(\.name),
                       prompt: Text("Untitled"))
 
             LabeledContent("Main stream") {
-                TextField("Main stream", text: $config.cameras[index].mainURL,
+                TextField("Main stream", text: field(\.mainURL),
                           prompt: Text("rtsp://host:554/stream"))
                     .labelsHidden()
                     .fontDesign(.monospaced)
@@ -389,7 +422,7 @@ struct CameraEditor: View {
 
             LabeledContent {
                 VStack(alignment: .trailing, spacing: 4) {
-                    TextField("Substream", text: $config.cameras[index].subURL,
+                    TextField("Substream", text: field(\.subURL),
                               prompt: Text("rtsp://host:554/substream"))
                         .labelsHidden()
                         .fontDesign(.monospaced)
@@ -401,7 +434,7 @@ struct CameraEditor: View {
                 Text("Substream")
             }
 
-            Picker("Use", selection: $config.cameras[index].preferSub) {
+            Picker("Use", selection: field(\.preferSub)) {
                 Text("Main").tag(false)
                 Text("Substream").tag(true)
             }
@@ -410,12 +443,12 @@ struct CameraEditor: View {
 
             LabeledContent("Aspect") {
                 HStack(spacing: 10) {
-                    AspectGlyph(fit: config.cameras[index].fit)
-                    Text(config.cameras[index].fit == .fit
+                    AspectGlyph(fit: camera.fit)
+                    Text(camera.fit == .fit
                          ? "bars top & bottom" : "edges cropped")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Picker("Aspect", selection: $config.cameras[index].fit) {
+                    Picker("Aspect", selection: field(\.fit)) {
                         Text("Fit (letterbox)").tag(FitMode.fit)
                         Text("Fill (crop)").tag(FitMode.fill)
                     }
@@ -441,7 +474,7 @@ struct CameraEditor: View {
                 }
                 Spacer()
                 Button("Save") {
-                    KeychainStore.write(cameraID: config.cameras[index].id,
+                    KeychainStore.write(cameraID: cameraID,
                                         username: username, password: password)
                     credsSavedAt = username.isEmpty && password.isEmpty ? nil : .now
                 }
@@ -476,12 +509,12 @@ struct CameraEditor: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 12)],
                       alignment: .leading, spacing: 12) {
                 StreamPreviewCard(title: "Main",
-                                  pathSuffix: pathSuffix(of: config.cameras[index].mainURL),
+                                  pathSuffix: pathSuffix(of: camera.mainURL),
                                   isActive: !usesSubstream,
                                   test: mainTest)
                 if hasSubstream {
                     StreamPreviewCard(title: "Sub",
-                                      pathSuffix: pathSuffix(of: config.cameras[index].subURL),
+                                      pathSuffix: pathSuffix(of: camera.subURL),
                                       isActive: usesSubstream,
                                       test: subTest)
                 }
@@ -509,15 +542,15 @@ struct CameraEditor: View {
     }
 
     private var hasSubstream: Bool {
-        !config.cameras[index].subURL.isEmpty
+        !camera.subURL.isEmpty
     }
 
     private var usesSubstream: Bool {
-        config.cameras[index].preferSub && hasSubstream
+        camera.preferSub && hasSubstream
     }
 
     private func testConnection() {
-        let camera = config.cameras[index]
+        let camera = camera
         lastTested = .now
         mainTest = StreamTest(phase: .testing)
         runTest(base: camera.mainURL, camera: camera) { mutate in mutate(&mainTest) }
