@@ -117,6 +117,7 @@ targets:
       - RCamTests
       - RCamKit/H264Bitstream.swift
       - RCamKit/StreamHealth.swift
+      - RCam/CameraPresets.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam.tests

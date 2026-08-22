@@ -289,6 +289,7 @@ struct CameraEditor: View {
     @State private var mainTest = StreamTest()
     @State private var subTest = StreamTest()
     @State private var lastTested: Date?
+    @State private var showPresets = false
 
     struct StreamTest {
         enum Phase: Equatable {
@@ -409,7 +410,7 @@ struct CameraEditor: View {
     // MARK: - Camera
 
     private var cameraSection: some View {
-        Section("Camera") {
+        Section {
             TextField("Name", text: field(\.name),
                       prompt: Text("Untitled"))
 
@@ -456,7 +457,32 @@ struct CameraEditor: View {
                     .fixedSize()
                 }
             }
+        } header: {
+            HStack {
+                Text("Camera")
+                Spacer()
+                // Sits in the section header, like Test Connection does in
+                // Preview: this action rewrites both URL fields, so hanging it
+                // off the Main stream row alone would understate its reach.
+                Button("Fill from Preset…") { showPresets = true }
+                    .controlSize(.small)
+                    .popover(isPresented: $showPresets, arrowEdge: .bottom) {
+                        PresetFillPopover(currentMainURL: camera.mainURL,
+                                          onFill: applyPreset)
+                    }
+            }
         }
+    }
+
+    /// Writes both URLs at once. Half-applying a preset — a fresh main beside
+    /// a stale sub from another platform — would leave the Use picker aimed at
+    /// a camera that does not exist, so a preset with no substream clears the
+    /// sub rather than leaving it behind. `name` is never touched.
+    private func applyPreset(mainURL: String, subURL: String) {
+        guard let i = config.cameras.firstIndex(where: { $0.id == cameraID })
+        else { return }
+        config.cameras[i].mainURL = mainURL
+        config.cameras[i].subURL = subURL
     }
 
     // MARK: - Credentials
