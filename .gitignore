@@ -13,3 +13,4 @@ Configs/extension-version.txt
 auto.crt
 auto.key
 build-tsan/
+/Configs
