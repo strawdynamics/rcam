@@ -1,0 +1,261 @@
+# RCam — Review Remediation Loop (2026-08-21)
+
+Self-contained spec + task list for an autonomous implementation loop. Actions a
+code-review agent's findings on the M0–M5 codebase. Every finding below was
+**verified against the source before this doc was written** — including two the
+reviewer got wrong, corrected inline. Decisions in **Locked decisions** were
+settled with the user on 2026-08-21 and are **locked**; do not re-litigate them.
+
+Predecessor: `loops/20260820-A-LOOP.md` (M0–M5, parked at HUMAN GATE 3). That
+gate is **retired into this doc** — its checklist is absorbed by this loop's
+single human gate at the end. Do not work the old doc's gate separately.
+
+Suggested invocation: `/loop Read loops/20260821-A-FEEDBACK.md, then execute one iteration per its Loop Protocol.`
+
+---
+
+## Loop Protocol
+
+Each iteration:
+
+1. Read **State** (bottom of this file). Find the current milestone (first with unchecked tasks).
+2. Do the next unchecked task (or a small coherent batch). Implement fully — no stubs left behind unless the task says so.
+3. Run that task's **Verify** command(s). Never check a box without actually running its verification.
+4. Update State: check boxes, append a one-line entry to the Iteration Log (`- <date> F<n>: what happened`).
+5. Commit at every green state: `git add -A && git commit -m "F<n>: <summary>"`. **Local only — never push.**
+6. On reaching the `⛔ HUMAN GATE`: finish everything automatable first, then write the exact manual steps + diagnostic commands into the gate's State entry, notify the user, and **stop the loop** (do not schedule another wakeup).
+
+Rules:
+
+- If the same failure repeats 3 times, stop retrying, record it under **Blockers** in State with what was tried, and stop the loop.
+- Regenerate the Xcode project with `xcodegen generate` after any `project.yml` change; never hand-edit `project.pbxproj`.
+- `scripts/build.sh` is the only way to see a change in the running app. After it replaces the extension, **quit and relaunch RCam** — a running app process holds a stale DAL view of the virtual device.
+- The test rig must never be left running. `scripts/testrig.sh stop` at the end of any milestone that started it.
+- **Never `git push`.** A private GitHub remote (`github`) exists and both branches are already on it; this loop stays local. The user decides when to publish.
+- Do not weaken a verification to make it pass. If a check can't be made to work as written, record why under **Blockers** and propose the substitute rather than silently downgrading it.
+
+---
+
+## Locked decisions
+
+| Topic | Decision |
+|---|---|
+| Scope | The whole review: findings 1–8, both documentation minors, a unit-test target, `build.sh --release`, and `project.yml` settingGroups. Nothing deferred. |
+| Committed key (F0) | `git rm` + `.gitignore` only. **No history rewrite, no force-push.** The reviewer assumed there was no remote; there is (private), and both branches are pushed, so a rewrite would mean force-pushing two branches while GitHub keeps the unreachable blob until its own GC. The pair is a self-signed `CN=mediamtx` cert for a 127.0.0.1 test rig, regenerated on demand — it protects nothing. |
+| Deployment target | **macOS 14.0 → 15.0**, an explicit amendment to the M0 locked decision, taken so `StopFlag` can use `Synchronization.Atomic<Int32>`. The user is the only user and runs macOS 26.5. |
+| Finding 3 fix | **Both** halves: parse SPS/PPS on every packet (folded into the NAL walk `annexBToLengthPrefixed` already performs, so it is free), rebuild the decoder when they differ from the current pair, **and** emit `.failed` after `decodeFailureThreshold` consecutive `decodePacket` nils so the existing reconnect machinery catches every other silent-nil cause. |
+| Finding 4 fix | `runLoop()` tears down VideoToolbox on its own exit path. `stop()` sets the atomic, waits `stopWaitSeconds` (above the 5s socket timeout so it normally succeeds), and **drains the semaphore on the timeout path**. |
+| Finding 7 fix | Distinguish absent from unparseable; preserve the bad file as `cameras.json.bak` before anything can overwrite it; debounce `save()`; surface both load-corruption and write failure **in the UI** (menu bar + Settings), not only `os_log`. |
+| Tests | Pure parsers extracted to Foundation-only files; `RCamTests` bundle (Swift Testing) compiles **only** those files — no FFmpeg headers, no linker flags. `scripts/test.sh` runs them. |
+| Build config | `scripts/build.sh --release` added; Debug stays the default so loop iterations stay fast; the final task before the gate installs a Release build. |
+| Git | Commit the pending `loops/` move → fast-forward `main` to `app-icon` → work on a new `review-fixes` branch → commit at green states → never push. |
+| Human gates | Exactly one, at the end, absorbing the old HUMAN GATE 3 DoD checklist plus checks specific to what this loop changed. |
+
+Tunable constants introduced by this loop (name them explicitly in code, don't inline the magic numbers):
+
+- `decodeFailureThreshold = 30` — consecutive `decodePacket` nils before `.failed` (~1s at 30fps).
+- `stopWaitSeconds = 6` — `stop()`'s bounded wait, chosen above the 5s ffmpeg socket `timeout`.
+- `saveDebounceSeconds = 0.5` — `ConfigStore.save()` coalescing window.
+
+---
+
+## Verified findings (audited 2026-08-21, before any code was changed)
+
+Each was confirmed by reading the source. File:line references are against the
+tree at commit `80ab419`.
+
+**1 — Committed private key. CONFIRMED, premise corrected.**
+`auto.crt` and `auto.key` are tracked (added in `e5e360d`), referenced by nothing
+in the tree, and are a self-signed `CN=mediamtx` pair (valid to 2036) left behind
+by running the test rig from the repo root. **Correction:** the reviewer wrote
+"the repo has no remote yet". It does — `github.com/paulstraw/rcam`, private,
+with both `main` and `app-icon` already pushed. See the locked decision.
+
+**2 — Credentials in the thread name. CONFIRMED.**
+`RTSPSource.swift:56` sets `thread.name = "RTSPSource(\(url))"`. Both call sites
+pass a credential-bearing URL: `RCamController.swift:248` uses
+`ConfigStore.resolvedURL(for:)` and `SettingsView.swift:477` uses
+`ConfigStore.resolvedURL(_:cameraID:)`, both of which inject the Keychain
+password into `URLComponents.password`. Thread names surface in crash reports,
+`sample` output, and Instruments.
+
+**3 — Mid-stream parameter-set changes stall forever. CONFIRMED.**
+`RTSPSource.swift:179` only parses in-band SPS/PPS while `parameterSets == nil`,
+contradicting the comment at `:177`; `:184` only builds the decoder while
+`formatDescription == nil`. Every failure path in `decodePacket` returns `nil`
+silently (`:285, :299, :306, :330, :341, :343, :346, :349`) while `av_read_frame`
+keeps succeeding — so `.failed` never fires, the controller never tears down or
+backs off, and the extension shows "No signal" until the TCP connection itself
+dies.
+
+**4 — `stop()` can tear down VideoToolbox under a live decode. CONFIRMED, plus one the reviewer missed.**
+`stop()` waits 3s on `finished` (`:65`) then calls `teardownVideoToolbox()` from
+the caller's thread (`:67`), while the ffmpeg socket `timeout` is 5s (`:109`) —
+so on a wedged connection the demux thread can still be inside `decodePacket`
+using `decompressionSession` when another thread invalidates and nils it.
+`StopFlag.stopped` (`:78`) is a plain `Int32` touched from main, `teardownQueue`,
+the demux thread, and a `@convention(c)` interrupt callback with no atomics.
+**Additional latent bug:** on the timeout path `stop()` sets `thread = nil` but
+never drains `finished`, so the late signal leaves the semaphore at 1 and the
+*next* `stop()` returns immediately regardless of thread state.
+
+**5 — Every "Test Connection" leaks an `RTSPSource`. CONFIRMED.**
+`SettingsView.swift:479` — `finish` captures `source` strongly, and
+`source.onFrame` / `source.onStateChange` capture `finish`. The callbacks are
+never nil'd after `stop()`, so the cycle is never broken and each test leaks a
+stopped source plus its closures. `deinit` therefore never runs either.
+
+**6 — `SinkWriter` is racy across threads. CONFIRMED.**
+`enqueue` (`SinkWriter.swift:61`) runs on the demux thread via
+`RCamController.makeSource`'s `onFrame`, while `stop()` (`:52`) runs on main via
+`disconnect()`. `queue`, `running`, and `formatDescription` are all read and
+written across those threads unsynchronized. `CMSimpleQueueEnqueue`'s status is
+discarded at `:92`, so a failed enqueue leaks the `passRetained` sample buffer,
+and the count-vs-capacity check at `:63` races the extension's consumption.
+
+**7 — Config persistence fails silently and destructively. CONFIRMED.**
+`ConfigStore.init` (`CameraConfig.swift:46`) collapses "file absent" and "file
+unparseable" into `cameras = []` via two `try?`s; the next `didSet` calls
+`save()` (`:65`), which atomically overwrites the file — permanently losing the
+user's cameras. `save()` runs on every keystroke of every text field, and swallows
+write errors with `try?`.
+
+**8 — User re-selection doesn't bypass backoff. CONFIRMED.**
+`RCamController.select` (`:120`) sets `selectedID` but `poll` still gates
+connection on `Date() >= nextReconnectAllowed` (`:151`), which
+`handleSourceFailure` (`:305`) can have pushed 30s out. The guard at `:121`
+(`camera.id != config.selectedID || activeSource == nil`) does let a re-pick of
+the failed camera through, since `activeSource` is nil after a failure — so a
+reset inside `select` fixes both the switch case and the re-pick case.
+
+**Minors — all CONFIRMED.** No test target exists anywhere in `project.yml`.
+`scripts/build.sh` hardcodes `-configuration Debug` at lines 14, 17, and 20. The
+FFmpeg search-path/linker block is duplicated verbatim at `project.yml:31-34` and
+`:93-96`. Nothing outside `RTSPSource.swift` references the bitstream parsers, so
+extracting them is self-contained.
+
+---
+
+## Milestones
+
+### F0 — Repo hygiene and project configuration
+
+No behavior change. Gets `project.yml` and the build script right once, before
+any code milestone edits them.
+
+- [ ] `git checkout -b review-fixes`. All subsequent work happens on `review-fixes`.
+- [ ] Remove the committed key: `git rm auto.crt auto.key`, and add `auto.crt` / `auto.key` to `.gitignore`. No history rewrite.
+- [ ] `project.yml`: `deploymentTarget.macOS` → `"15.0"`.
+- [ ] `project.yml`: collapse the duplicated FFmpeg settings into a `settingGroups` entry (`ffmpeg`: `SWIFT_INCLUDE_PATHS`, `HEADER_SEARCH_PATHS`, `LIBRARY_SEARCH_PATHS`, `OTHER_LDFLAGS`) and reference it from `RCam` and `rcamcli` via `settings.groups`.
+- [ ] `scripts/build.sh`: accept `--release`. One `CONFIGURATION` variable must drive both `xcodebuild` invocations *and* the `APP_SRC` product path (the current script hardcodes `Debug` in three places). Default stays `Debug`. Echo which configuration was installed.
+
+**Verify**: `git ls-files | grep -c 'auto\.\(crt\|key\)'` is `0` and both files are gone from the working tree; `git check-ignore auto.key` succeeds. `scripts/build.sh` exits 0 and `defaults read /Applications/RCam.app/Contents/Info LSMinimumSystemVersion` prints `15.0`. `scripts/build.sh --release` exits 0 and installs from `build/Build/Products/Release/`. `git diff` on the regenerated project shows the FFmpeg flags still present on both targets. Commit.
+
+### F1 — Extract the pure parsers and stand up tests
+
+Tests land **before** the decode-path surgery in F2, so the riskiest change has a
+safety net.
+
+- [ ] New `RCamKit/H264Bitstream.swift` — Foundation only, **no `import CFFmpeg`**. Move `ParameterSets`, `parseParameterSets`, `parseAVCC`, `parseAnnexBParameterSets`, `annexBNALUnits`, and `annexBToLengthPrefixed` out of `RTSPSource` into an `enum H264Bitstream` namespace. Make `ParameterSets` `Equatable` (F2 needs it to detect changes). Keep `parseParameterSets`'s `UnsafeMutablePointer<UInt8>?` signature — it is fed `codecpar.extradata` directly.
+- [ ] New `RCamKit/StreamHealth.swift` — Foundation only. Two pure pieces:
+  - `DecodeFailureCounter` — `init(threshold:)`, `mutating func record(success: Bool) -> Bool` returning `true` exactly once when the run of failures reaches the threshold, resetting on success.
+  - `streamLabel(forURL:)` — strips userinfo and returns `host:port/path` (no scheme-level credentials, no query). This is what F2 puts in the thread name; it must be impossible for a password to survive it.
+- [ ] Update `RTSPSource` to call through to the moved code. Nothing else in the tree references these functions, so no other call sites change.
+- [ ] `project.yml`: new `RCamTests` target, `type: bundle.unit-test`, platform macOS, sources = `RCamTests/` plus **only** `RCamKit/H264Bitstream.swift` and `RCamKit/StreamHealth.swift`. No FFmpeg group, no test host. Add a `test:` action to the `RCam` scheme covering it.
+- [ ] `RCamTests/` using **Swift Testing** (`import Testing`). Cover, at minimum: a well-formed avcC; avcC truncated at each early-return branch (`size > 7`, the SPS length reads, the `offset < size` boundary before the PPS count, the PPS length reads); annex-B with 3-byte and 4-byte start codes intermixed; annex-B missing SPS, missing PPS, and with neither; zero-size and nil input; `annexBToLengthPrefixed` dropping NAL types 7/8/9/12 while keeping slices and emitting big-endian 4-byte lengths; a trailing NAL with no following start code; `DecodeFailureCounter` firing exactly once at the threshold and resetting on success; `streamLabel(forURL:)` stripping `user:password@` from a realistic RTSP URL.
+- [ ] `scripts/test.sh` — `xcodebuild test -project RCam.xcodeproj -scheme RCam -derivedDataPath build`.
+
+**Verify**: `scripts/test.sh` exits 0 with every test passing; deliberately break one assertion and confirm the script exits non-zero (a test target that silently runs nothing is the classic failure here). `scripts/build.sh` exits 0 — `RTSPSource` still compiles against the moved code. `rcamcli capture rtsp://127.0.0.1:8554/test --seconds 5 --out /tmp/f1` (rig started first) still yields animating 1280x720 PNGs, proving the extraction was behavior-preserving. Stop the rig. Commit.
+
+### F2 — RTSPSource: credentials, reconfiguration, teardown (findings 2, 3, 4)
+
+- [ ] **Finding 2**: `thread.name = "RTSPSource(\(StreamHealth.streamLabel(forURL: url)))"`. `RTSPSource` never learns the camera's display name, so the label is derived from the URL rather than threading a new initializer parameter through both call sites.
+- [ ] **Finding 3a**: parse SPS/PPS from every packet. Fold the parameter-set extraction into the single NAL walk `annexBToLengthPrefixed` already performs, so the per-packet cost is unchanged — do not add a second full walk per packet.
+- [ ] **Finding 3b**: when the newly parsed `ParameterSets` differs from the current one, tear down and rebuild the decoder (format description, decompression session, transfer session, pool) before decoding that packet. Log the change at `info` with old→new dimensions.
+- [ ] **Finding 3c**: `DecodeFailureCounter(threshold: decodeFailureThreshold)` in the demux loop. On a nil from `decodePacket`, `record(success: false)`; when it fires, emit `.failed("decode stalled — N consecutive failures")` and break the loop so `handleSourceFailure` runs the existing backoff. Reset on every successful frame.
+- [ ] **Finding 4a**: `StopFlag` holds `Atomic<Int32>` from `Synchronization` (`import Synchronization`; store as a `let` since `Atomic` is non-copyable). Interrupt callback does a relaxed load; `start`/`stop` do relaxed stores.
+- [ ] **Finding 4b**: move `teardownVideoToolbox()` to `runLoop()`'s exit path so the owning thread always performs it. `stop()` sets the flag, waits `stopWaitSeconds`, and on timeout **drains** `finished` (a non-blocking `wait(timeout: .now())` after the late signal, or equivalent bookkeeping) so a stale signal can never pre-satisfy the next `stop()`. Verify by inspection that no path can leave the semaphore with a stray count.
+- [ ] **Minor**: one comment at the `VTDecompressionSessionDecodeFrame` call noting that synchronous decode delivers in decode order, so the pipeline assumes no B-frames — true of essentially every IP camera, but currently unstated.
+
+**Verify**:
+1. `scripts/test.sh` green; `scripts/build.sh` exits 0.
+2. **No credentials in the thread name**: start the rig, run `rcamcli capture` against a URL with `user:pass@` in it, and while it runs `sample rcamcli 1 -f /tmp/sample.txt`; assert the thread name appears and `grep -c 'pass@' /tmp/sample.txt` is `0`.
+3. **Reconfiguration**: with the app streaming `Test A`, run `scripts/testrig.sh stop-push test` then `scripts/testrig.sh start-push test 640x360` and confirm from `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info` that the stream recovers and frames flow again. **Honest caveat:** mediamtx drops readers when a publisher disconnects, so this most likely exercises the reconnect path rather than a true in-band parameter-set change. That is an acceptable outcome — record which path the log shows. The rebuild logic itself is covered by the `ParameterSets` equality unit tests; if you can find a way to make the rig deliver a genuine mid-session change, do it, but do not fake one.
+4. **Decode-failure counter**: the rig cannot produce decodable-but-unrenderable packets, so verify the counter through its unit tests plus one temporary fault injection — force `decodePacket` to return nil under a `#if DEBUG` flag, confirm `.failed` fires after exactly `decodeFailureThreshold` packets and the controller's backoff log line appears, then **remove the injection before committing**.
+5. **Teardown**: a start/stop stress loop — 50 cycles of `RTSPSource.start()` / `stop()` against the rig (a `rcamcli` subcommand is fine, note it in the log if you add one) with no crash and no hang; plus the same run under Thread Sanitizer (`xcodebuild -enableThreadSanitizer YES`) reporting zero races on `stopped`, `decompressionSession`, or `formatDescription`.
+
+Stop the rig. Commit.
+
+### F3 — SinkWriter and the Test Connection leak (findings 5, 6)
+
+- [ ] **Finding 6a**: guard `SinkWriter`'s mutable state (`queue`, `running`, `formatDescription`) with an `OSAllocatedUnfairLock` or equivalent so `enqueue` on the demux thread cannot observe or race `stop()` on main. Keep the critical section tight — this is a per-frame path.
+- [ ] **Finding 6b**: check `CMSimpleQueueEnqueue`'s status; on anything other than `noErr`, release the `passRetained` sample buffer rather than leaking it, and log at `error` (rate-limited or change-only, so a persistently-full queue can't flood the log).
+- [ ] **Finding 5**: in `SettingsView.runTest`, nil `source.onFrame`, `source.onStateChange`, and `source.onStreamInfo` inside `finish` before stopping, breaking the retain cycle. Prefer nil'ing the callbacks over weak captures so the fix is visible at the point the cycle is created.
+
+**Verify**: `scripts/build.sh` exits 0. **Leak**: add a temporary `os_log` in `RTSPSource.deinit`, run five Test Connections from Settings against the rig, and confirm five deinit lines — then decide whether the log line is worth keeping (it is cheap and it is exactly the signal that was missing). **Race**: with a Thread Sanitizer build, stream from the rig and force a `disconnect()` (stop the capturing client so the unwatched grace expires) while frames are flowing; assert zero TSan reports naming `SinkWriter`. Stop the rig. Commit.
+
+### F4 — Config durability (finding 7)
+
+- [ ] `ConfigStore.init` distinguishes three cases: file absent (normal first run, empty list, no warning); file present and parseable (load); file present and unparseable or unreadable (**move it to `cameras.json.bak`** before anything can overwrite it, then start empty).
+- [ ] A published error state on `ConfigStore` (e.g. `@Published var persistenceError: String?`) covering both load corruption and save failure.
+- [ ] Surface it: the menu bar shows the error instead of the usual status, and Settings shows it prominently. Reuse the existing error-card copy/expand UX from Settings if it fits — the review specifically praised it.
+- [ ] Debounce `save()` by `saveDebounceSeconds` so it stops firing per keystroke, and make sure a pending save is flushed on app termination so nothing is lost.
+- [ ] Replace the `try?`s in `save()` with real error handling that sets `persistenceError`. Keep the atomic write.
+
+**Verify**: with RCam quit, write garbage into `~/Library/Containers/com.paulstraw.rcam/Data/Library/Application Support/RCam/cameras.json`, launch RCam, and assert (a) `cameras.json.bak` exists containing the garbage, (b) the error is visible in the menu bar, (c) editing a camera and quitting does not destroy the `.bak`. Then restore a good `cameras.json` and confirm normal load with no error shown. Separately, confirm the debounce: type into a camera name field and check the file's mtime updates once after the pause rather than per keystroke. Commit.
+
+### F5 — Controller: backoff bypass and threading documentation (finding 8, minors)
+
+- [ ] **Finding 8**: `RCamController.select` resets `backoffSeconds = 1` and `nextReconnectAllowed = .distantPast`. An explicit user action is a strong signal; it should never wait out a 30s backoff. This covers both switching cameras and re-picking the failed one after fixing it (the `:121` guard already lets the latter through, since `activeSource` is nil after a failure).
+- [ ] **Minor**: a comment block on `RCamController` stating the threading contract — which members are main-thread-only (`unwatchedSince`, `backoffSeconds`, `nextReconnectAllowed`, `statusText`, `streamingCameraID`, `lastPollDiagnostic`), which are guarded by `switchLock` (`activeSource`, `pendingSource`), and that `completeSwitch` / `setSwitching` are deliberately called from the decode thread. This is documentation only — do not restructure the threading.
+
+**Verify**: start the rig, let a camera fail (`scripts/testrig.sh stop-push test`), watch the log until the backoff has grown past a few seconds, restart the push, then immediately `rcamcli select-camera "<name>"` and assert from the log that the reconnect attempt happens on the next 1s poll rather than after the remaining backoff. `scripts/test.sh` and `scripts/build.sh` green. Stop the rig. Commit.
+
+### F6 — Release install and handoff
+
+- [ ] `scripts/build.sh --release` and confirm the installed app reports the Release build.
+- [ ] Full regression before the gate: `scripts/test.sh` green; rig up; `rcamcli probe-device --frames 120` green; `rcamcli capture` on both rig paths green; rig down.
+- [ ] Write the gate checklist into **State** with exact commands, then stop the loop.
+
+**Verify**: all of the above green, working tree clean, `git log --oneline main..review-fixes` shows one commit per milestone, and `git status` confirms nothing was pushed.
+
+---
+
+## ⛔ HUMAN GATE — real-camera validation (absorbs old Gate 3)
+
+Everything automatable is done. This gate combines the previously unfinished
+definition-of-done checklist with checks specific to what this loop changed.
+
+**Carried over from the old HUMAN GATE 3:**
+
+- [ ] Six real cameras configured (creds land in Keychain; substream preferred where ≥720p is available)
+- [ ] "RTSP Camera" works in QuickTime, Safari (a WebRTC test page), Zoom, Meet, FaceTime
+- [ ] Switching sources from the menu bar mid-call works
+- [ ] Survives a camera reboot (placeholder → auto-reconnect) and a Mac sleep/wake cycle
+- [ ] Launches at login
+- [ ] Rough latency check: point a camera at a phone stopwatch
+
+**New, specific to this loop:**
+
+- [ ] The app still launches and streams after the **macOS 15 deployment-target bump** (nothing here should be version-sensitive, but this is the first real-camera run since the bump)
+- [ ] **No credentials in diagnostics**: with a real authenticated camera streaming, run `sample RCam 1 -f /tmp/rcam-sample.txt` and confirm the password appears nowhere (`grep` for it)
+- [ ] **Reconnect after a real reconfiguration**: change a camera's resolution or encoding profile in its own web UI while RCam is streaming it, and confirm RCam recovers (either a decoder rebuild or a clean reconnect — both are acceptable; a permanent "No signal" is not, and is precisely the bug finding 3 describes)
+- [ ] **User re-selection beats backoff**: unplug a camera, wait for "No signal" and a grown backoff, plug it back in, pick it from the menu, and confirm it reconnects within about a second rather than waiting
+- [ ] **Config durability**: quit RCam and confirm `cameras.json` still holds all six cameras and still contains no credentials (`grep` for the password)
+- [ ] **Release build**: `/Applications/RCam.app` is the Release build and CPU use while streaming is at or below what the Debug build used
+
+When this passes, merge `review-fixes` into `main` and decide whether to push.
+
+Diagnostics: `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info` (app) / same with `.extension` (extension). After any rebuild: quit RCam, `scripts/build.sh`, reopen RCam **twice** (activation replace, then fresh DAL view).
+
+---
+
+## State
+
+**Current milestone**: **F0 — Repo hygiene and project configuration** (nothing started)
+
+**Blockers**: none
+
+### Iteration Log
+
+(append one line per iteration)
