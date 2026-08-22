@@ -307,3 +307,62 @@ struct LengthPrefixTests {
         #expect(out == [])
     }
 }
+
+// MARK: - convert (the single-walk primitive)
+
+@Suite("convert")
+struct ConvertTests {
+    @Test("picks out in-band SPS and PPS in the same walk that builds the payload")
+    func extractsParameterSetsAndPayload() throws {
+        let data = startCode4 + spsNAL + startCode4 + ppsNAL + startCode4 + sliceNAL
+        let converted = try #require(withBytes(data) { H264Bitstream.convert(data: $0, size: $1) })
+        #expect(converted.sps == spsNAL)
+        #expect(converted.pps == ppsNAL)
+        #expect(converted.lengthPrefixed == [0x00, 0x00, 0x00, UInt8(sliceNAL.count)] + sliceNAL)
+    }
+
+    @Test("reports SPS and PPS independently when a packet carries only one")
+    func splitAcrossPackets() throws {
+        let spsOnly = try #require(withBytes(startCode4 + spsNAL) { H264Bitstream.convert(data: $0, size: $1) })
+        #expect(spsOnly.sps == spsNAL)
+        #expect(spsOnly.pps == nil)
+        #expect(spsOnly.lengthPrefixed.isEmpty)
+
+        let ppsOnly = try #require(withBytes(startCode4 + ppsNAL) { H264Bitstream.convert(data: $0, size: $1) })
+        #expect(ppsOnly.sps == nil)
+        #expect(ppsOnly.pps == ppsNAL)
+        #expect(ppsOnly.lengthPrefixed.isEmpty)
+    }
+
+    @Test("a slice-only packet reports no parameter sets")
+    func sliceOnly() throws {
+        let converted = try #require(withBytes(startCode4 + sliceNAL) { H264Bitstream.convert(data: $0, size: $1) })
+        #expect(converted.sps == nil)
+        #expect(converted.pps == nil)
+        #expect(!converted.lengthPrefixed.isEmpty)
+    }
+
+    @Test("a buffer with no NAL units yields nil")
+    func noUnits() {
+        #expect(withBytes([0xAA, 0xBB, 0xCC]) { H264Bitstream.convert(data: $0, size: $1) } == nil)
+    }
+
+    @Test("agrees with annexBToLengthPrefixed, which delegates to it")
+    func agreesWithLegacyEntryPoint() {
+        let data = startCode4 + audNAL + startCode4 + spsNAL + startCode3 + ppsNAL
+            + startCode4 + fillerNAL + startCode4 + sliceNAL
+        let viaConvert = withBytes(data) { H264Bitstream.convert(data: $0, size: $1)?.lengthPrefixed }
+        let direct = withBytes(data) { H264Bitstream.annexBToLengthPrefixed(data: $0, size: $1) }
+        #expect(viaConvert == direct)
+    }
+
+    @Test("a changed SPS makes the ParameterSets pair compare unequal")
+    func parameterSetsEquality() {
+        // This is what the mid-stream rebuild check in runLoop() depends on.
+        let original = H264Bitstream.ParameterSets(sps: spsNAL, pps: ppsNAL)
+        let resized = H264Bitstream.ParameterSets(sps: [0x67, 0x42, 0x00, 0x1F], pps: ppsNAL)
+        #expect(original != resized)
+        #expect(original == H264Bitstream.ParameterSets(sps: spsNAL, pps: ppsNAL))
+        #expect(original != H264Bitstream.ParameterSets(sps: spsNAL, pps: [0x68, 0xCE, 0x38, 0x81]))
+    }
+}

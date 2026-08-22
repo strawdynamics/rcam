@@ -11,3 +11,4 @@ Configs/Version.xcconfig
 *.blend1
 auto.crt
 auto.key
+build-tsan/
