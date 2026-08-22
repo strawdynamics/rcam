@@ -213,9 +213,9 @@ Stop the rig. Commit.
 
 ### F6 — Release install and handoff
 
-- [ ] `scripts/build.sh --release` and confirm the installed app reports the Release build.
-- [ ] Full regression before the gate: `scripts/test.sh` green; rig up; `rcamcli probe-device --frames 120` green; `rcamcli capture` on both rig paths green; rig down.
-- [ ] Write the gate checklist into **State** with exact commands, then stop the loop.
+- [x] `scripts/build.sh --release` and confirm the installed app reports the Release build.
+- [x] Full regression before the gate: `scripts/test.sh` green; rig up; `rcamcli probe-device --frames 120` green; `rcamcli capture` on both rig paths green; rig down.
+- [x] Write the gate checklist into **State** with exact commands, then stop the loop.
 
 **Verify**: all of the above green, working tree clean, `git log --oneline main..review-fixes` shows one commit per milestone, and `git status` confirms nothing was pushed.
 
@@ -252,7 +252,7 @@ Diagnostics: `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info`
 
 ## State
 
-**Current milestone**: **F6 — Release install and handoff** (nothing started)
+**Current milestone**: **⛔ HUMAN GATE — real-camera validation.** All six milestones (F0–F6) are done, verified and committed on `review-fixes`. The loop is stopped. Nothing further is automatable without real cameras and a reboot.
 
 F0 complete. Notes carried forward:
 - The git housekeeping from the earlier draft (commit the `loops/` move, fast-forward `main` to `app-icon`) was already done before this loop started: `main` already contained it, and `app-icon` is now a stale duplicate that differs from `main` only in this doc. `review-fixes` was branched from `main` at `cf4c3b9`.
@@ -265,9 +265,11 @@ F1 complete. Notes carried forward:
 - The tests found a real bug while being written: `URLComponents(string: "rtsp://")` returns a **non-nil, empty** host, so `streamLabel` returned `""` instead of taking the redacting fallback. Fixed with an `!host.isEmpty` check.
 - 42 tests in 6 suites. F2 should extend `DecodeFailureCounter` coverage only if its semantics change; the threshold-30 case is already pinned.
 
-**Blockers**: none.
+**Blockers**:
 
-*(Resolved 2026-08-21, during F5.)* The "RTSP Camera" virtual device was invisible to every process for most of F2–F4 — the extension registered as `activated enabled` but no extension process ran, with 16 stale entries stuck in `[terminated waiting to uninstall on reboot]`. It came back on its own before F5 without a reboot and without any code change, which fits the accumulated-sysext diagnosis. Everything it had blocked has since been run and passed: F2 verify 3's app-level recovery, F3's SinkWriter Thread Sanitizer check, and F5's own verification. If it recurs, the symptom is `rcamcli probe-device` reporting `device "RTSP Camera" not found` while `systemextensionsctl list` shows the extension activated; a reboot clears the backlog.
+- **`REBOOT REQUIRED` before the gate.** The "RTSP Camera" virtual device is missing again, and this time it did not come back: three retries over ~2.5 minutes with a relaunch each. `systemextensionsctl list` shows the current build `[activated enabled]` but **21** stale `com.paulstraw.rcam.extension` entries in `[terminated waiting to uninstall on reboot]`, and no extension process running. The backlog grows by one on every `scripts/build.sh`, so this will keep recurring until a reboot clears it. It blocked F6's `probe-device --frames 120` only — every other F6 check passed. Step 0 of the gate below handles it.
+
+*(Earlier occurrence, resolved 2026-08-21 during F5.)* The "RTSP Camera" virtual device was invisible to every process for most of F2–F4 — the extension registered as `activated enabled` but no extension process ran, with 16 stale entries stuck in `[terminated waiting to uninstall on reboot]`. It came back on its own before F5 without a reboot and without any code change, which fits the accumulated-sysext diagnosis. Everything it had blocked has since been run and passed: F2 verify 3's app-level recovery, F3's SinkWriter Thread Sanitizer check, and F5's own verification. If it recurs, the symptom is `rcamcli probe-device` reporting `device "RTSP Camera" not found` while `systemextensionsctl list` shows the extension activated; a reboot clears the backlog.
 
 ### Iteration Log
 
@@ -285,3 +287,83 @@ F1 complete. Notes carried forward:
 - 2026-08-21 F5 (deferred verifications picked up once the device returned):
   - **F2 verify 3, app-level half** — now passes. Across the F5 run the app survived the publisher dying and coming back: repeated `.failed` → backoff → reconnect, then live frames again (`probe-device --frames 400` reports `meanLuma=122.4`, matching the rig's synthetic content rather than the "No signal" placeholder). As predicted, this is the reconnect path, not a true in-band parameter-set change.
   - **F3's SinkWriter race check** — now passes, via a different route than the task described. Four attempts to build the *app* under Thread Sanitizer failed: `-enableThreadSanitizer YES` is ignored for `xcodebuild build`, bare `OTHER_SWIFT_FLAGS`/`OTHER_LDFLAGS` break the extension's link (command-line settings hit every target), and with `$(inherited)` the flags reached both compiler and linker yet only the *extension* binary came out instrumented, never the app. Stopped there per the 3-strike rule and drove the real `SinkWriter` from a temporary `rcamcli sink-race` command instead — same concurrency shape as `disconnect()`: `enqueue` hammering from a background thread while `stop()` lands on the calling thread, against the real CMIO sink. **20 cycles, 0 TSan reports.** Then a negative control: locking commented out, same test → TSan reports a data race naming `SinkWriter.stop` and the process aborts (exit 134). So the check has real power, and the lock is what removes the race. Temp command, the temporary `RCam/SinkWriter.swift` entry in the rcamcli target, and the negative-control edit were all reverted and grep-verified before committing.
+- 2026-08-21 F6: `scripts/build.sh --release` run; the installed `/Applications/RCam.app` binary is **byte-identical** to `build/Build/Products/Release/RCam.app` (sha256 `2440f48e…`) and differs from the Debug product, `LSMinimumSystemVersion` 15.0. Regression: `scripts/test.sh` 48/48; `rcamcli capture` green on **both** rig paths (`/test` 138 frames @27.4fps, `/test-sub` 141 frames @28.0fps, 5 PNGs each, 1280x720). `probe-device --frames 120` **blocked** — the extension replacement dropped the virtual device again and it did not return after three relaunch-and-wait retries; see Blockers. Rig stopped, working tree clean, `main..review-fixes` is exactly six commits (one per milestone), and `review-fixes` exists on no remote. Gate checklist written below; loop stopped.
+
+---
+
+## ⛔ GATE HANDOFF — exact steps
+
+Everything automatable is done. What remains needs real cameras, a reboot, and human eyes.
+
+### Step 0 — reboot first (required)
+
+Nothing below involving the virtual camera will work until the stale system-extension
+backlog is cleared. 21 copies are queued for uninstall-on-reboot.
+
+```sh
+# after rebooting:
+cd ~/dev/rcam
+systemextensionsctl list | grep paulstraw | grep -c "waiting to uninstall"   # expect 0
+open -a /Applications/RCam.app          # then quit and reopen once more
+build/Build/Products/Release/rcamcli probe-device --frames 30                # expect: OK: found "RTSP Camera"
+```
+
+If `probe-device` still fails, the app is fine but the device is not published — re-run
+`scripts/build.sh --release`, relaunch RCam **twice**, and re-probe.
+
+### Step 1 — the two checks the rig could not do
+
+```sh
+scripts/testrig.sh start
+build/Build/Products/Release/rcamcli probe-device --frames 120   # the one F6 check left unrun
+scripts/testrig.sh stop
+```
+
+Then, in Settings → Cameras, click **Test Connection** five times against a rig camera and
+confirm five `deinit` lines — the F3 leak fix was proved with a faithful reproduction of
+`runTest`'s closure shape, not the button itself, so this is the one path still worth an eyeball:
+
+```sh
+log stream --predicate 'subsystem == "com.paulstraw.rcam" AND category == "RTSPSource"' --info | grep deinit
+```
+
+### Step 2 — carried over from the old HUMAN GATE 3
+
+- [ ] Six real cameras configured (creds land in Keychain; substream preferred where ≥720p is available)
+- [ ] "RTSP Camera" works in QuickTime, Safari (a WebRTC test page), Zoom, Meet, FaceTime
+- [ ] Switching sources from the menu bar mid-call works
+- [ ] Survives a camera reboot (placeholder → auto-reconnect) and a Mac sleep/wake cycle
+- [ ] Launches at login
+- [ ] Rough latency check: point a camera at a phone stopwatch
+
+### Step 3 — specific to this loop
+
+- [ ] **macOS 15 deployment bump** — app still launches and streams (first real-camera run since 14.0 → 15.0)
+- [ ] **No credentials in diagnostics** — with a real authenticated camera streaming:
+      `sample RCam 1 -f /tmp/rcam-sample.txt && grep -c '<the password>' /tmp/rcam-sample.txt`  → expect `0`
+      (also expect the thread name to read `RTSPSource(<host>:<port>/<path>)`)
+- [ ] **Reconnect after a real reconfiguration** — change a camera's resolution or profile in its own
+      web UI while RCam streams it. Either a decoder rebuild or a clean reconnect is fine; a permanent
+      "No signal" is the finding-3 bug. Watch for the rebuild line:
+      `log stream --predicate 'subsystem == "com.paulstraw.rcam"' --info | grep -E "parameter sets changed|decode stalled|failed"`
+      This is the one check the rig genuinely could not perform — mediamtx drops readers when a
+      publisher restarts, so it only ever exercised the reconnect path.
+- [ ] **User re-selection beats backoff** — unplug a camera, wait for "No signal" and a grown backoff,
+      plug it back in, pick it from the menu. Expect a reconnect within ~1s and this line:
+      `user selection clears <N>s of remaining reconnect backoff`
+- [ ] **Config durability** — quit RCam, then:
+      `cd ~/Library/Containers/com.paulstraw.rcam/Data/Library/Application\ Support/RCam`
+      `python3 -c "import json;print(len(json.load(open('cameras.json'))))"`  → expect 6
+      `grep -c '<the password>' cameras.json`  → expect `0`
+- [ ] **Release build** — `/Applications/RCam.app` is Release (already confirmed byte-identical) and CPU
+      while streaming is at or below the Debug build's
+
+### When it passes
+
+```sh
+git checkout main && git merge --no-ff review-fixes
+# then decide whether to push — this loop never did
+```
+
+`app-icon` is a stale duplicate of `main` (it differs only in an earlier draft of this
+file) and can be deleted locally and on the remote whenever convenient.
