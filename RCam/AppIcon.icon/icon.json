@@ -1,0 +1,22 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "extended-srgb:0.298,0.349,0.435,1.000",
+      "extended-srgb:0.106,0.141,0.216,1.000"
+    ]
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "icon-1024.png",
+          "name" : "Connector camera"
+        }
+      ]
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [ "watchOS" ],
+    "squares" : [ "macOS" ]
+  }
+}

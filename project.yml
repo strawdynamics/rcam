@@ -36,6 +36,7 @@ targets:
       groups: [ffmpeg]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
       path: RCam/RCam.entitlements
       properties:

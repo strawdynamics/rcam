@@ -38,6 +38,15 @@ done
 
 mkdir -p Configs
 
+# The app icon's master render lives in docs/ (that's where the Blender icon loop
+# writes it), but actool will not follow a symlink out of the .icon bundle, so the
+# bundle needs its own copy. Re-sync it here rather than relying on whoever
+# re-renders the icon to remember.
+if ! cmp -s docs/icon-1024.png RCam/AppIcon.icon/Assets/icon-1024.png; then
+  cp docs/icon-1024.png RCam/AppIcon.icon/Assets/icon-1024.png
+  echo "Synced app icon from docs/icon-1024.png"
+fi
+
 # Hash everything the extension is built from.
 EXTENSION_INPUT_HASH="$(
   { find RCamExtension -type f -print0 | sort -z | xargs -0 shasum -a 256
