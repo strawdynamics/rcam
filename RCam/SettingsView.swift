@@ -9,21 +9,72 @@ struct SettingsView: View {
     let controller: RCamController
 
     var body: some View {
+        // The card lives inside each pane rather than wrapped around the
+        // TabView: the Settings scene hoists the tab picker into the window's
+        // toolbar, which overlays and clips anything placed above the TabView
+        // (whether by VStack or safeAreaInset).
         TabView {
             CamerasPane(config: config, controller: controller)
                 .tabItem { Label("Cameras", systemImage: "video") }
-            GeneralPane(controller: controller)
+            GeneralPane(config: config, controller: controller)
                 .tabItem { Label("General", systemImage: "gearshape") }
         }
         .frame(minWidth: 640, minHeight: 440)
     }
 }
 
+/// Config load/save failure, in the same shape as the per-stream error card:
+/// selectable red text plus copy and reveal actions.
+struct PersistenceErrorCard: View {
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Configuration problem")
+                    .font(.callout.weight(.semibold))
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 12) {
+                    Button("Reveal in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([ConfigStore.directoryURL])
+                    }
+                    Button("Copy details") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(message, forType: .string)
+                    }
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.red.opacity(0.09))
+        .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
 struct GeneralPane: View {
+    @ObservedObject var config: ConfigStore
     let controller: RCamController
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
+        VStack(spacing: 0) {
+            if let error = config.persistenceError {
+                PersistenceErrorCard(message: error)
+            }
+            generalForm
+        }
+    }
+
+    private var generalForm: some View {
         Form {
             Section {
                 Toggle(isOn: $launchAtLogin) {
@@ -64,12 +115,17 @@ struct CamerasPane: View {
     @State private var editingID: UUID?
 
     var body: some View {
-        HSplitView {
-            sidebar
-                .frame(minWidth: 200, idealWidth: 232, maxWidth: 280)
-            detail
-                .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
-                .layoutPriority(1)
+        VStack(spacing: 0) {
+            if let error = config.persistenceError {
+                PersistenceErrorCard(message: error)
+            }
+            HSplitView {
+                sidebar
+                    .frame(minWidth: 200, idealWidth: 232, maxWidth: 280)
+                detail
+                    .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
+            }
         }
         .frame(minWidth: 640, minHeight: 440)
         .onAppear { editingID = config.selectedID ?? config.cameras.first?.id }
