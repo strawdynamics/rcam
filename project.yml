@@ -101,11 +101,30 @@ targets:
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         INFOPLIST_KEY_NSCameraUsageDescription: rcamcli captures frames from the RCam virtual camera for testing.
 
+  RCamTests:
+    type: bundle.unit-test
+    platform: macOS
+    # Deliberately narrow: only the Foundation-only pure files. No FFmpeg
+    # settingGroup, no header search paths, no test host — so the tests build
+    # and run without libav and without launching the app.
+    sources:
+      - RCamTests
+      - RCamKit/H264Bitstream.swift
+      - RCamKit/StreamHealth.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam.tests
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   RCam:
     build:
       targets:
         RCam: all
+        RCamTests: [test]
+    test:
+      targets:
+        - RCamTests
   rcamcli:
     build:
       targets:
