@@ -481,6 +481,13 @@ struct CameraEditor: View {
                 guard !finished else { return }
                 finished = true
                 update { $0.phase = phase }
+                // Finding 5: `finish` holds `source` strongly and the source's
+                // callbacks hold `finish`, so the source can only be released
+                // once those callbacks are cleared. Nil'ing them here — rather
+                // than capturing weakly — keeps the fix next to the cycle.
+                source.onFrame = nil
+                source.onStateChange = nil
+                source.onStreamInfo = nil
                 DispatchQueue.global().async { source.stop() }
             }
         }
