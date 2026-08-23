@@ -7,6 +7,7 @@ import ServiceManagement
 struct SettingsView: View {
     @ObservedObject var config: ConfigStore
     let controller: RCamController
+    @ObservedObject var extensionManager: ExtensionManager
 
     var body: some View {
         // The card lives inside each pane rather than wrapped around the
@@ -16,7 +17,8 @@ struct SettingsView: View {
         TabView {
             CamerasPane(config: config, controller: controller)
                 .tabItem { Label("Cameras", systemImage: "video") }
-            GeneralPane(config: config, controller: controller)
+            GeneralPane(config: config, controller: controller,
+                        extensionManager: extensionManager)
                 .tabItem { Label("General", systemImage: "gearshape") }
         }
         .frame(minWidth: 640, minHeight: 440)
@@ -63,8 +65,10 @@ struct PersistenceErrorCard: View {
 struct GeneralPane: View {
     @ObservedObject var config: ConfigStore
     let controller: RCamController
+    @ObservedObject var extensionManager: ExtensionManager
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var showAcknowledgements = false
+    @State private var confirmRemoveExtension = false
 
     static var versionString: String {
         let info = Bundle.main.infoDictionary
@@ -144,10 +148,49 @@ struct GeneralPane: View {
                     Text("FFmpeg \(Acknowledgements.ffmpegVersion), under the LGPL.")
                 }
             }
+
+            // The removal half of the install the app performs on first launch.
+            // Deleting RCam.app does not take the extension with it, and
+            // `systemextensionsctl uninstall` needs SIP off, so without this
+            // there is no supported way off the machine at all.
+            Section {
+                LabeledContent {
+                    HStack(spacing: 12) {
+                        if extensionManager.canInstall {
+                            Button("Install") { extensionManager.activate() }
+                                .buttonStyle(.link)
+                                .font(.caption)
+                        }
+                        if extensionManager.canRemove {
+                            Button("Remove…") { confirmRemoveExtension = true }
+                                .buttonStyle(.link)
+                                .font(.caption)
+                        }
+                    }
+                } label: {
+                    Text("Virtual camera extension")
+                    Text(extensionManager.status)
+                }
+            } footer: {
+                Text("The RCam camera is provided by a system extension. Removing it takes the camera out of every app on this Mac.")
+            }
         }
         .formStyle(.grouped)
         .sheet(isPresented: $showAcknowledgements) {
             AcknowledgementsSheet()
+        }
+        .alert("Remove the RCam virtual camera?", isPresented: $confirmRemoveExtension) {
+            Button("Remove", role: .destructive) { extensionManager.deactivate() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // Promising an immediate removal would be a lie: macOS defers a CMIO
+            // extension's teardown to the next boot even with nothing attached.
+            Text("""
+                 RCam will stop appearing as a camera right away. macOS finishes \
+                 removing the extension on your next restart.
+
+                 You can install it again from this window at any time.
+                 """)
         }
     }
 }

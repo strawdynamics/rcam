@@ -41,8 +41,14 @@ struct RCamApp: App {
                 Text(controller.statusText)
             }
             Text("Extension: \(extensionManager.status)")
-            Button("Install Extension") {
-                extensionManager.activate()
+            // Offered only while it could still help. Under an "Activated"
+            // status an install button reads as if something did not take, and
+            // removal is deliberately not here: it is destructive, needs a
+            // confirmation, and belongs with the other rare actions in Settings.
+            if extensionManager.canInstall {
+                Button("Install Extension") {
+                    extensionManager.activate()
+                }
             }
             Divider()
             SettingsMenuButton()
@@ -58,7 +64,8 @@ struct RCamApp: App {
         }
 
         Settings {
-            SettingsView(config: config, controller: controller)
+            SettingsView(config: config, controller: controller,
+                         extensionManager: extensionManager)
         }
     }
 }
