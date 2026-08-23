@@ -18,6 +18,11 @@ settingGroups:
     SWIFT_INCLUDE_PATHS: $(SRCROOT)/RCamKit/CFFmpeg
     HEADER_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/include
     LIBRARY_SEARCH_PATHS: $(SRCROOT)/vendor/ffmpeg/lib
+    # Resolves through the lib<name>.dylib symlinks in vendor/ffmpeg/lib, which
+    # point at the soname-named real files. The linker records each library's
+    # install name (@rpath/lib<name>.<major>.dylib), so every target that links
+    # FFmpeg also needs an LD_RUNPATH_SEARCH_PATHS entry saying where to find
+    # them at runtime -- the app in its bundle, rcamcli in the vendor dir.
     OTHER_LDFLAGS: "-lavformat -lavcodec -lavutil"
 
 configFiles:
@@ -39,11 +44,34 @@ targets:
         buildPhase: resources
       - path: RCamKit
         excludes: ["CFFmpeg/**"]
+      # FFmpeg ships inside the bundle as replaceable dylibs rather than linked
+      # into the executable. That is what LGPL-2.1 §6(b) asks for -- see
+      # scripts/build-ffmpeg.sh and RCam/Acknowledgements.swift -- and it is why
+      # these are named here one by one: the soname is part of the file name, so
+      # an FFmpeg upgrade that bumps a major version has to be noticed here
+      # rather than at launch on a tester's Mac. scripts/build.sh asserts that
+      # this list matches what is actually in vendor/ffmpeg/lib.
+      - path: vendor/ffmpeg/lib/libavformat.61.dylib
+        buildPhase:
+          copyFiles:
+            destination: frameworks
+        attributes: [CodeSignOnCopy]
+      - path: vendor/ffmpeg/lib/libavcodec.61.dylib
+        buildPhase:
+          copyFiles:
+            destination: frameworks
+        attributes: [CodeSignOnCopy]
+      - path: vendor/ffmpeg/lib/libavutil.59.dylib
+        buildPhase:
+          copyFiles:
+            destination: frameworks
+        attributes: [CodeSignOnCopy]
     settings:
       groups: [ffmpeg]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
     entitlements:
       path: RCam/RCam.entitlements
       properties:
@@ -125,6 +153,9 @@ targets:
       groups: [ffmpeg]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam.cli
+        # A bare tool has no bundle to embed FFmpeg in, so it reads the dylibs
+        # straight out of the vendor directory. Dev-only, and never shipped.
+        LD_RUNPATH_SEARCH_PATHS: "$(SRCROOT)/vendor/ffmpeg/lib"
         # Embed an Info.plist section so TCC can attribute the camera-access
         # request to this binary (required for probe-device).
         GENERATE_INFOPLIST_FILE: YES

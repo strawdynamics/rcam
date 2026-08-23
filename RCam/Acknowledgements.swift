@@ -7,9 +7,14 @@ import SwiftUI
 /// to supply a copy of the license, and to make the corresponding source
 /// available. The first two happen in `AcknowledgementsSheet`; the third is the
 /// upstream tarball — FFmpeg is vendored unmodified — plus the published build
-/// recipe. §6 also wants the user to be able to relink against their own build
-/// of the library, which a signed, statically linked App Store bundle cannot
-/// offer; publishing the exact recipe is what stands in for it.
+/// recipe.
+///
+/// §6 also wants the user to be able to relink the work against their own build
+/// of the library, and offers two ways to satisfy it: ship the object files
+/// (§6a) or use "a suitable shared library mechanism" (§6b). RCam takes §6b —
+/// FFmpeg is three dylibs in `Contents/Frameworks`, replaceable in place — which
+/// is why the build is `--enable-shared`. A statically linked bundle offered
+/// neither, and a published build recipe is not one of the options.
 enum Acknowledgements {
     /// Must match `FFMPEG_VERSION` in `scripts/build-ffmpeg.sh`, which
     /// `scripts/build.sh` checks — a stale version here is a false statement in
@@ -73,13 +78,15 @@ struct AcknowledgementsSheet: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("FFmpeg \(Acknowledgements.ffmpegVersion)")
                 .font(.headline)
-            Text("LGPL-2.1-or-later · unmodified · statically linked")
+            Text("LGPL-2.1-or-later · unmodified · dynamically linked")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text("""
-                 RCam uses FFmpeg to demux and decode RTSP streams. FFmpeg is \
-                 not modified: it is built from the unmodified upstream release \
-                 below, with the configuration in the linked build recipe.
+                 RCam uses FFmpeg to demux RTSP streams. FFmpeg is not modified: \
+                 it is built from the unmodified upstream release below, with the \
+                 configuration in the linked build recipe, and ships as separate \
+                 libraries inside RCam.app/Contents/Frameworks so you can rebuild \
+                 and replace them.
                  """)
                 .font(.caption)
                 .foregroundStyle(.secondary)
