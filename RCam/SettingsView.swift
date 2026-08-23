@@ -64,6 +64,7 @@ struct GeneralPane: View {
     @ObservedObject var config: ConfigStore
     let controller: RCamController
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var showAcknowledgements = false
 
     static var versionString: String {
         let info = Bundle.main.infoDictionary
@@ -130,9 +131,24 @@ struct GeneralPane: View {
                     Text(Self.versionString)
                         .fontDesign(.monospaced)
                 }
+
+                // Sits with Version because together they are the about box
+                // this app never got: RCam is LSUIElement, so there is no app
+                // menu to hang a standard About panel off.
+                LabeledContent {
+                    Button("Show") { showAcknowledgements = true }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                } label: {
+                    Text("Acknowledgements")
+                    Text("FFmpeg \(Acknowledgements.ffmpegVersion), under the LGPL.")
+                }
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $showAcknowledgements) {
+            AcknowledgementsSheet()
+        }
     }
 }
 

@@ -38,6 +38,23 @@ done
 
 mkdir -p Configs
 
+# The FFmpeg version is stated in three places: FFMPEG_VERSION here, the string
+# the acknowledgements panel shows the user, and the published build recipe.
+# Bump one and the other two keep asserting the old version -- in a legal
+# notice, where a wrong answer is indistinguishable from a right one. The gist
+# is a manual step, but the in-app copy can be held to the script.
+RECIPE_FFMPEG_VERSION="$(sed -n 's/^FFMPEG_VERSION="\(.*\)"$/\1/p' scripts/build-ffmpeg.sh)"
+APP_FFMPEG_VERSION="$(sed -n 's/.*static let ffmpegVersion = "\(.*\)".*/\1/p' RCam/Acknowledgements.swift)"
+if [[ -z "$RECIPE_FFMPEG_VERSION" || -z "$APP_FFMPEG_VERSION" ]]; then
+  echo "error: could not read the FFmpeg version from build-ffmpeg.sh and/or Acknowledgements.swift" >&2
+  exit 1
+fi
+if [[ "$RECIPE_FFMPEG_VERSION" != "$APP_FFMPEG_VERSION" ]]; then
+  echo "error: Acknowledgements.swift says FFmpeg $APP_FFMPEG_VERSION, build-ffmpeg.sh builds $RECIPE_FFMPEG_VERSION" >&2
+  echo "       Update RCam/Acknowledgements.swift, and re-publish the build recipe gist it links." >&2
+  exit 1
+fi
+
 # The app icon's master render lives in docs/ (that's where the Blender icon loop
 # writes it), but actool will not follow a symlink out of the .icon bundle, so the
 # bundle needs its own copy. Re-sync it here rather than relying on whoever

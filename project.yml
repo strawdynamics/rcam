@@ -29,7 +29,14 @@ targets:
     type: application
     platform: macOS
     sources:
-      - RCam
+      # The license is called out explicitly rather than left to the RCam glob:
+      # its extension matches no known type, so the build phase XcodeGen infers
+      # for it is not something to rely on. LGPL-2.1 §6 requires a copy of the
+      # license to accompany the binary, so it has to land in Resources.
+      - path: RCam
+        excludes: ["Resources/COPYING.LGPLv2.1"]
+      - path: RCam/Resources/COPYING.LGPLv2.1
+        buildPhase: resources
       - path: RCamKit
         excludes: ["CFFmpeg/**"]
     settings:
