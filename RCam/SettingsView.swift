@@ -574,11 +574,13 @@ struct CameraEditor: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 12)],
                       alignment: .leading, spacing: 12) {
                 StreamPreviewCard(title: "Main",
+                                  url: camera.mainURL,
                                   pathSuffix: pathSuffix(of: camera.mainURL),
                                   isActive: !usesSubstream,
                                   test: mainTest)
                 if hasSubstream {
                     StreamPreviewCard(title: "Sub",
+                                      url: camera.subURL,
                                       pathSuffix: pathSuffix(of: camera.subURL),
                                       isActive: usesSubstream,
                                       test: subTest)
@@ -695,6 +697,9 @@ struct AspectGlyph: View {
 
 struct StreamPreviewCard: View {
     let title: String
+    /// Needed for `StreamHealth.localNetworkHint`, which classifies the host to
+    /// decide whether a failure is worth blaming on Local Network privacy.
+    let url: String
     let pathSuffix: String?
     let isActive: Bool
     let test: CameraEditor.StreamTest
@@ -806,6 +811,7 @@ struct StreamPreviewCard: View {
                     .foregroundStyle(.secondary)
             }
         case .error(let message):
+            let hint = StreamHealth.localNetworkHint(forURL: url, message: message)
             VStack(alignment: .leading, spacing: 4) {
                 Text(message)
                     .font(.caption)
@@ -813,10 +819,26 @@ struct StreamPreviewCard: View {
                     .lineLimit(showFullError ? nil : 2)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                // The likeliest cause of this particular failure is a permission
+                // RCam was never granted, which the error text actively
+                // misdirects away from. Secondary styling, because it is a
+                // guess -- the error above it is the fact.
+                if let hint {
+                    Text(hint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 HStack(spacing: 12) {
                     if message.count > 90 {
                         Button(showFullError ? "Hide full log" : "Show full log") {
                             showFullError.toggle()
+                        }
+                    }
+                    if hint != nil {
+                        Button("Open Local Network Settings") {
+                            NSWorkspace.shared.open(Self.localNetworkSettingsURL)
                         }
                     }
                     Button("Copy details") {
@@ -829,6 +851,12 @@ struct StreamPreviewCard: View {
             }
         }
     }
+
+    /// Undocumented System Settings anchor. If Apple retires it, the pane still
+    /// opens at Privacy & Security rather than failing to open at all, which is
+    /// why this is one URL and not a resolve-then-fallback.
+    private static let localNetworkSettingsURL =
+        URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")!
 
     private var detailsText: String? {
         guard let info = test.info else { return nil }

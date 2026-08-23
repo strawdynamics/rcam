@@ -467,10 +467,16 @@ public final class RTSPSource: FrameSource {
 
     // MARK: - Misc
 
+    /// The numeric AVERROR is carried alongside the prose deliberately.
+    /// `FrameSourceState.failed` is frozen at `(String)`, so the string is the
+    /// only channel a consumer has, and matching on av_strerror's wording would
+    /// couple the UI to phrasing nothing in this repo pins. See
+    /// `StreamHealth.localNetworkHint(forURL:message:)`, which reads the code
+    /// back out.
     static func errorString(_ code: Int32) -> String {
         var buffer = [CChar](repeating: 0, count: 128)
         av_strerror(code, &buffer, buffer.count)
-        return String(cString: buffer)
+        return "\(String(cString: buffer)) (\(code))"
     }
 
     static func now() -> TimeInterval {

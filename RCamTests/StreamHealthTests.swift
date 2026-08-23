@@ -126,3 +126,65 @@ struct StreamLabelTests {
         #expect(!StreamHealth.streamLabel(forURL: "not a url").isEmpty)
     }
 }
+
+@Suite("localNetworkHint")
+struct LocalNetworkHintTests {
+    /// The message shape RTSPSource.errorString produces for EHOSTUNREACH.
+    static let unreachable = "open failed: No route to host (-65)"
+
+    @Test("fires for a camera on a private subnet")
+    func firesOnPrivateHost() {
+        for host in ["192.168.1.12", "10.0.0.5", "172.16.3.1", "172.31.255.254",
+                     "169.254.1.1", "camera.local", "[fe80::1]", "[fd00::abcd]"] {
+            let hint = StreamHealth.localNetworkHint(forURL: "rtsp://\(host):554/stream",
+                                                     message: Self.unreachable)
+            #expect(hint != nil, "expected a hint for \(host)")
+        }
+    }
+
+    /// The local test rig runs on 127.0.0.1 and Local Network privacy does not
+    /// gate loopback, so a hint there would be wrong every single day.
+    @Test("stays quiet for loopback, public, and near-miss addresses")
+    func silentOnNonLocalHost() {
+        for host in ["127.0.0.1", "[::1]", "8.8.8.8", "172.15.0.1", "172.32.0.1",
+                     "192.169.0.1", "example.com", "[2001:db8::1]"] {
+            let hint = StreamHealth.localNetworkHint(forURL: "rtsp://\(host):554/stream",
+                                                     message: Self.unreachable)
+            #expect(hint == nil, "expected no hint for \(host)")
+        }
+    }
+
+    /// Deliberately narrow: a private host that fails any other way is a real
+    /// network or stream problem, and pointing at Privacy settings would send
+    /// the user somewhere useless.
+    @Test("only EHOSTUNREACH qualifies")
+    func silentOnOtherErrors() {
+        let url = "rtsp://192.168.1.12:554/stream"
+        #expect(StreamHealth.localNetworkHint(forURL: url,
+                                              message: "open failed: Connection refused (-61)") == nil)
+        #expect(StreamHealth.localNetworkHint(forURL: url,
+                                              message: "no video stream") == nil)
+        #expect(StreamHealth.localNetworkHint(forURL: url,
+                                              message: "unsupported codec (only H.264 in v1)") == nil)
+    }
+
+    @Test("reads the code past prose that itself contains parentheses")
+    func parsesTrailingCode() {
+        #expect(StreamHealth.errorCode(inMessage: "open failed: No route to host (-65)") == -65)
+        #expect(StreamHealth.errorCode(inMessage: "decode stalled (30 in a row) (-1094995529)")
+                == -1094995529)
+        #expect(StreamHealth.errorCode(inMessage: "no video stream") == nil)
+        #expect(StreamHealth.errorCode(inMessage: "unsupported codec (only H.264 in v1)") == nil)
+    }
+
+    /// Credentials and unparseable URLs must not cost the hint: those are
+    /// exactly the URLs real cameras produce.
+    @Test("classifies hosts URLComponents cannot parse")
+    func handlesAwkwardURLs() {
+        #expect(StreamHealth.localNetworkHint(forURL: "rtsp://admin:p@ss:word@192.168.1.12:554/h264",
+                                              message: Self.unreachable) != nil)
+        #expect(StreamHealth.localNetworkHint(forURL: "rtsp://192.168.1.12", message: Self.unreachable) != nil)
+        #expect(StreamHealth.localNetworkHint(forURL: "", message: Self.unreachable) == nil)
+        #expect(StreamHealth.localNetworkHint(forURL: "not a url", message: Self.unreachable) == nil)
+    }
+}
