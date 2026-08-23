@@ -142,14 +142,14 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
 
         let sourceStreamID = UUID(uuidString: "A1B2C3D4-E5F6-4A7B-9C8D-0E1F2A3B4C5D")!
         sourceStreamSource = RCamSourceStreamSource(
-            localizedName: "RTSP Camera Video",
+            localizedName: "RCam Video",
             streamID: sourceStreamID,
             streamFormat: streamFormat,
             device: device
         )
         let sinkStreamID = UUID(uuidString: "B2C3D4E5-F6A7-4B8C-9D0E-1F2A3B4C5D6E")!
         sinkStreamSource = RCamSinkStreamSource(
-            localizedName: "RTSP Camera Sink",
+            localizedName: "RCam Sink",
             streamID: sinkStreamID,
             streamFormat: streamFormat,
             device: device

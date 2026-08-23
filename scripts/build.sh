@@ -55,6 +55,28 @@ if [[ "$RECIPE_FFMPEG_VERSION" != "$APP_FFMPEG_VERSION" ]]; then
   exit 1
 fi
 
+# The sink stream's name is a cross-process contract with no compile-time check:
+# the extension declares it, and the app finds the stream by exact name match.
+# A mismatch is not subtle -- the menu bar reads "Sink attach failed" -- but it
+# is only discoverable once the device is back, and any RCamExtension/ edit takes
+# the device down until a reboot. So a typo costs two reboots to find and fix.
+# Catch it here instead; build.sh is not part of EXTENSION_INPUT_HASH, so this
+# check is free of any extension-version churn.
+EXT_SINK_NAME="$(awk '/RCamSinkStreamSource\(/ { found = 1 }
+                      found && /localizedName:/ { match($0, /"[^"]*"/)
+                                                 print substr($0, RSTART + 1, RLENGTH - 2)
+                                                 exit }' RCamExtension/Provider.swift)"
+APP_SINK_NAME="$(sed -n 's/.*static let sinkStreamName = "\(.*\)".*/\1/p' RCam/SinkWriter.swift)"
+if [[ -z "$EXT_SINK_NAME" || -z "$APP_SINK_NAME" ]]; then
+  echo "error: could not read the sink stream name from Provider.swift and/or SinkWriter.swift" >&2
+  exit 1
+fi
+if [[ "$EXT_SINK_NAME" != "$APP_SINK_NAME" ]]; then
+  echo "error: the extension names the sink stream \"$EXT_SINK_NAME\", the app looks for \"$APP_SINK_NAME\"" >&2
+  echo "       They must match exactly -- SinkWriter finds the stream by name." >&2
+  exit 1
+fi
+
 # The app icon's master render lives in docs/ (that's where the Blender icon loop
 # writes it), but actool will not follow a symlink out of the .icon bundle, so the
 # bundle needs its own copy. Re-sync it here rather than relying on whoever
