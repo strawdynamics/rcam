@@ -11,6 +11,14 @@ let kFrameRate: Int32 = 30
 
 let extensionLog = Logger(subsystem: "com.strawdynamics.rcam.extension", category: "Provider")
 
+/// CoreMediaIO throws plain NSErrors whose `localizedDescription` is usually the
+/// generic "the operation couldn't be completed" — the domain and code are the
+/// part that identifies the failure. Every fatal path below logs through this.
+private func describe(_ error: Error) -> String {
+    let nsError = error as NSError
+    return "\(nsError.domain) \(nsError.code): \(nsError.localizedDescription)"
+}
+
 // MARK: - Provider
 
 final class RCamProviderSource: NSObject, CMIOExtensionProviderSource {
@@ -24,7 +32,11 @@ final class RCamProviderSource: NSObject, CMIOExtensionProviderSource {
         do {
             try provider.addDevice(deviceSource.device)
         } catch {
-            fatalError("Failed to add device: \(error.localizedDescription)")
+            // Unrecoverable and deterministic: every input here is a compile-time
+            // constant, so a failure repeats on every launch. Log before dying —
+            // the crash report is hard to find, the unified log is where you look.
+            extensionLog.fault("Failed to add device: \(describe(error), privacy: .public)")
+            fatalError("Failed to add device: \(describe(error))")
         }
         extensionLog.info("Provider initialized, device added")
     }
@@ -107,7 +119,7 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
         )
 
         var formatDescription: CMFormatDescription?
-        CMVideoFormatDescriptionCreate(
+        let formatStatus = CMVideoFormatDescriptionCreate(
             allocator: kCFAllocatorDefault,
             codecType: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
             width: kOutputWidth,
@@ -115,8 +127,14 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
             extensions: nil,
             formatDescriptionOut: &formatDescription
         )
+        guard formatStatus == noErr, let formatDescription else {
+            // Force-unwrapping here would crash with "unexpectedly found nil" and
+            // no status code — the least explainable death in this initializer.
+            extensionLog.fault("CMVideoFormatDescriptionCreate failed: \(formatStatus)")
+            fatalError("CMVideoFormatDescriptionCreate failed: \(formatStatus)")
+        }
         let streamFormat = CMIOExtensionStreamFormat(
-            formatDescription: formatDescription!,
+            formatDescription: formatDescription,
             maxFrameDuration: frameDuration,
             minFrameDuration: frameDuration,
             validFrameDurations: nil
@@ -140,7 +158,8 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
             try device.addStream(sourceStreamSource.stream)
             try device.addStream(sinkStreamSource.stream)
         } catch {
-            fatalError("Failed to add streams: \(error.localizedDescription)")
+            extensionLog.fault("Failed to add streams: \(describe(error), privacy: .public)")
+            fatalError("Failed to add streams: \(describe(error))")
         }
     }
 
@@ -478,14 +497,21 @@ final class RCamSourceStreamSource: NSObject, CMIOExtensionStreamSource {
 
     func startStream() throws {
         guard let deviceSource = device.source as? RCamDeviceSource else {
-            fatalError("Unexpected device source type")
+            // CMIOExtensionDevice.source is a *weak* property, so this is a
+            // liveness check, not a type check. It cannot fail in practice: the
+            // strong chain from main.swift's global `providerSource` holds the
+            // device source for the life of the process.
+            extensionLog.fault("startStream: device source deallocated")
+            fatalError("device source deallocated")
         }
         deviceSource.startStreaming()
     }
 
     func stopStream() throws {
         guard let deviceSource = device.source as? RCamDeviceSource else {
-            fatalError("Unexpected device source type")
+            // Weak deref, as in startStream above.
+            extensionLog.fault("stopStream: device source deallocated")
+            fatalError("device source deallocated")
         }
         deviceSource.stopStreaming()
     }
