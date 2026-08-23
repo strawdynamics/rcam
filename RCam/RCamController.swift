@@ -75,6 +75,14 @@ final class RCamController: ObservableObject {
 
         // Scripted/test switching: rcamcli posts a distributed notification
         // with the camera name or id.
+        //
+        // Debug-only, deliberately. DistributedNotificationCenter is a system-
+        // wide bus with no sender authentication: any process on the machine,
+        // sandboxed or not, can post these. Switching someone's camera mid-call
+        // is bad; silently flipping launch-at-login is worse. rcamcli only ever
+        // drives a Debug build (scripts/build.sh defaults to Debug), so gating
+        // here costs the test workflow nothing.
+        #if DEBUG
         DistributedNotificationCenter.default().addObserver(
             forName: Self.selectNotification, object: nil, queue: .main
         ) { [weak self] note in
@@ -95,6 +103,7 @@ final class RCamController: ObservableObject {
         ) { [weak self] note in
             self?.setLaunchAtLogin((note.object as? String) == "1")
         }
+        #endif
 
         // Sleep/wake: tear down before sleep; reconnect immediately on wake
         // rather than waiting out dead TCP connections.
