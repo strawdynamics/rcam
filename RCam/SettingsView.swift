@@ -65,6 +65,13 @@ struct GeneralPane: View {
     let controller: RCamController
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
+    static var versionString: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(short) (\(build))"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if let error = config.persistenceError {
@@ -106,6 +113,22 @@ struct GeneralPane: View {
                 } label: {
                     Text("Output video size")
                     Text("Every camera is scaled to this size at \(OutputFormat.frameRate) fps.")
+                }
+
+                // Beta testers report bugs against a build, not a version, so
+                // the build number has to be readable without digging into the
+                // bundle. Copy button for the same reason.
+                LabeledContent {
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(Self.versionString, forType: .string)
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                } label: {
+                    Text("Version")
+                    Text(Self.versionString)
+                        .fontDesign(.monospaced)
                 }
             }
         }
