@@ -20,9 +20,17 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.video</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>RCam pushes video into its own virtual camera device.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright (c) 2026 Straw Dynamics. All rights reserved.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>RCam connects to RTSP cameras on your local network.</string>
 </dict>
 </plist>
