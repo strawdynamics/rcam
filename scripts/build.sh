@@ -63,7 +63,7 @@ else
   # No state yet, but a previously-installed extension may carry a much larger
   # version (this scheme replaced an epoch stamp). Seed above it: macOS refuses
   # to activate a lower version than the one already installed.
-  INSTALLED_EXTENSION_PLIST=/Applications/RCam.app/Contents/Library/SystemExtensions/com.paulstraw.rcam.extension.systemextension/Contents/Info.plist
+  INSTALLED_EXTENSION_PLIST=/Applications/RCam.app/Contents/Library/SystemExtensions/com.strawdynamics.rcam.extension.systemextension/Contents/Info.plist
   if [[ -f "$INSTALLED_EXTENSION_PLIST" ]]; then
     PREVIOUS_VERSION="$(defaults read "${INSTALLED_EXTENSION_PLIST%.plist}" CFBundleVersion 2>/dev/null || echo 0)"
     [[ "$PREVIOUS_VERSION" =~ ^[0-9]+$ ]] || PREVIOUS_VERSION=0
@@ -98,6 +98,12 @@ if [[ ! -d "$APP_SRC" ]]; then
   exit 1
 fi
 
+if [[ "$EXTENSION_CHANGED" == yes ]]; then
+  systemextensionsctl uninstall \
+    TK7EDP5B95 com.strawdynamics.rcam.extension \
+    2>/dev/null || true
+fi
+
 rm -rf /Applications/RCam.app
 ditto "$APP_SRC" /Applications/RCam.app
 
@@ -109,7 +115,7 @@ if [[ "$EXTENSION_CHANGED" == yes ]]; then
 
   ⚠️  The system extension changed, so this build is an UPGRADE.
       macOS will tear down the running extension and defer the old copy's
-      uninstall to the next reboot. Expect "RTSP Camera" to go missing:
+      uninstall to the next reboot. Expect "RCam" to go missing:
       quit and relaunch RCam, and if the device does not come back, reboot.
 WARNING
 else

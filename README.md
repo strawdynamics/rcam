@@ -1,6 +1,6 @@
 # RCam
 
-A macOS menu bar app that turns RTSP camera streams (security cams, IP cams) into a virtual camera — "RTSP Camera" — usable in QuickTime, Zoom, Meet, FaceTime, etc.
+A macOS menu bar app that turns RTSP camera streams (security cams, IP cams) into a virtual camera — RCam — usable in QuickTime, Zoom, Meet, FaceTime, etc.
 
 ## How it works
 

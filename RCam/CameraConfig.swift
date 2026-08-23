@@ -46,7 +46,7 @@ final class ConfigStore: ObservableObject {
 
     private var pendingSave: DispatchWorkItem?
     private var terminationObserver: NSObjectProtocol?
-    private let log = Logger(subsystem: "com.paulstraw.rcam", category: "ConfigStore")
+    private let log = Logger(subsystem: "com.strawdynamics.rcam", category: "ConfigStore")
 
     /// Application Support directory holding the config (and, from the
     /// user's point of view, "where RCam keeps its files").
@@ -192,7 +192,7 @@ enum KeychainStore {
         var password: String
     }
 
-    private static let service = "com.paulstraw.rcam"
+    private static let service = "com.strawdynamics.rcam"
 
     static func read(cameraID: UUID) -> Credentials? {
         let query: [CFString: Any] = [

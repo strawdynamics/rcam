@@ -260,7 +260,7 @@ struct EmptyCamerasView: View {
                 .foregroundStyle(.quaternary)
             Text("Add your first camera")
                 .font(.headline)
-            Text("Paste an RTSP URL from your NVR or camera. RCam turns it into the “RTSP Camera” device your apps can pick.")
+            Text("Paste an RTSP URL from your NVR or camera. RCam turns it into a virtual camera your apps can pick.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -399,9 +399,9 @@ struct CameraEditor: View {
 
     private var headerSubtitle: String {
         if isLive {
-            return "Currently feeding the RTSP Camera virtual device"
+            return "Currently feeding the RCam virtual device"
         } else if isSelected {
-            return "Selected — streams when an app uses the RTSP Camera device"
+            return "Selected — streams when an app uses the RCam device"
         } else {
             return "Not selected — choose it from the menu bar to go live"
         }

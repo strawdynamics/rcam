@@ -4,11 +4,11 @@ import os.log
 
 /// Submits activation requests for the CMIO extension and reports progress.
 final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionRequestDelegate {
-    static let extensionIdentifier = "com.paulstraw.rcam.extension"
+    static let extensionIdentifier = "com.strawdynamics.rcam.extension"
 
     @Published var status = "not installed"
 
-    private let log = Logger(subsystem: "com.paulstraw.rcam", category: "ExtensionManager")
+    private let log = Logger(subsystem: "com.strawdynamics.rcam", category: "ExtensionManager")
 
     override init() {
         super.init()

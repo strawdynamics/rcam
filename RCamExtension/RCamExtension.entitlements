@@ -6,7 +6,7 @@
 	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>TK7EDP5B95.com.paulstraw.rcam</string>
+		<string>TK7EDP5B95.com.strawdynamics.rcam</string>
 	</array>
 </dict>
 </plist>

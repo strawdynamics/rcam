@@ -52,7 +52,7 @@ public final class RTSPSource: FrameSource {
     /// signal — see `start()`.
     private var abandonedRun = false
 
-    private let log = Logger(subsystem: "com.paulstraw.rcam", category: "RTSPSource")
+    private let log = Logger(subsystem: "com.strawdynamics.rcam", category: "RTSPSource")
 
     /// `fill: true` crops to fill the 16:9 output instead of letterboxing.
     public init(url: String, fill: Bool = false) {

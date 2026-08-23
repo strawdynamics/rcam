@@ -1,6 +1,6 @@
 name: RCam
 options:
-  bundleIdPrefix: com.paulstraw
+  bundleIdPrefix: com.strawdynamics
   deploymentTarget:
     macOS: "15.0"
   createIntermediateGroups: true
@@ -35,7 +35,7 @@ targets:
     settings:
       groups: [ffmpeg]
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam
+        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
       path: RCam/RCam.entitlements
@@ -64,12 +64,12 @@ targets:
     sources: [RCamExtension]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam.extension
-        PRODUCT_NAME: com.paulstraw.rcam.extension
+        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam.extension
+        PRODUCT_NAME: com.strawdynamics.rcam.extension
         # Deliberately NOT the app's epoch stamp. This version only changes when
         # the extension's own inputs change (see scripts/build.sh); re-activating
         # at an unchanged version is a no-op, which is what keeps the running
-        # extension -- and the "RTSP Camera" device -- alive across a build.
+        # extension -- and the "RCam" device -- alive across a build.
         CURRENT_PROJECT_VERSION: $(EXTENSION_PROJECT_VERSION)
     entitlements:
       path: RCamExtension/RCamExtension.entitlements
@@ -79,14 +79,15 @@ targets:
         # must descend from an app group in the extension's entitlements
         # (verified against sysextd log + OBS's shipping extension).
         com.apple.security.application-groups:
-          - TK7EDP5B95.com.paulstraw.rcam
+          - TK7EDP5B95.com.strawdynamics.rcam
     info:
       path: RCamExtension/Info.plist
       properties:
         CFBundlePackageType: SYSX
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
-        NSSystemExtensionUsageDescription: RCam provides the "RTSP Camera" virtual camera device.
+        CFBundleName: RCam
+        NSSystemExtensionUsageDescription: RCam provides a virtual camera device.
         CMIOExtension:
           CMIOExtensionMachServiceName: $(TeamIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)
 
@@ -100,7 +101,7 @@ targets:
     settings:
       groups: [ffmpeg]
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam.cli
+        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam.cli
         # Embed an Info.plist section so TCC can attribute the camera-access
         # request to this binary (required for probe-device).
         GENERATE_INFOPLIST_FILE: YES
@@ -120,7 +121,7 @@ targets:
       - RCam/CameraPresets.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.paulstraw.rcam.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam.tests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:

@@ -9,7 +9,7 @@ let kOutputWidth: Int32 = 1280
 let kOutputHeight: Int32 = 720
 let kFrameRate: Int32 = 30
 
-let extensionLog = Logger(subsystem: "com.paulstraw.rcam.extension", category: "Provider")
+let extensionLog = Logger(subsystem: "com.strawdynamics.rcam.extension", category: "Provider")
 
 // MARK: - Provider
 
@@ -20,7 +20,7 @@ final class RCamProviderSource: NSObject, CMIOExtensionProviderSource {
     init(clientQueue: DispatchQueue?) {
         super.init()
         provider = CMIOExtensionProvider(source: self, clientQueue: clientQueue)
-        deviceSource = RCamDeviceSource(localizedName: "RTSP Camera")
+        deviceSource = RCamDeviceSource(localizedName: "RCam")
         do {
             try provider.addDevice(deviceSource.device)
         } catch {
@@ -46,7 +46,7 @@ final class RCamProviderSource: NSObject, CMIOExtensionProviderSource {
     ) throws -> CMIOExtensionProviderProperties {
         let providerProperties = CMIOExtensionProviderProperties(dictionary: [:])
         if properties.contains(.providerManufacturer) {
-            providerProperties.manufacturer = "paulstraw"
+            providerProperties.manufacturer = "Straw Dynamics"
         }
         return providerProperties
     }
@@ -76,7 +76,7 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private var switching = false
     private let debugBars = ProcessInfo.processInfo.environment["RCAM_TEST_BARS"] != nil
 
-    private let timerQueue = DispatchQueue(label: "com.paulstraw.rcam.extension.emit",
+    private let timerQueue = DispatchQueue(label: "com.strawdynamics.rcam.extension.emit",
                                            qos: .userInteractive)
     private var timer: DispatchSourceTimer?
 

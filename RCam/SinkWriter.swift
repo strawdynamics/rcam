@@ -17,7 +17,7 @@ final class SinkWriter {
     static let deviceUID = "7E5F9C1A-3B2D-4E6F-8A90-C1D2E3F4A5B6"
     static let sinkStreamName = "RTSP Camera Sink"
 
-    private let log = Logger(subsystem: "com.paulstraw.rcam", category: "SinkWriter")
+    private let log = Logger(subsystem: "com.strawdynamics.rcam", category: "SinkWriter")
     private var deviceID: CMIOObjectID = 0
     private var sinkStreamID: CMIOStreamID = 0
 

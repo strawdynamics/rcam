@@ -59,7 +59,7 @@ struct CLIMain {
                 exit(64)
             }
             DistributedNotificationCenter.default().postNotificationName(
-                Notification.Name("com.paulstraw.rcam.selectCamera"),
+                Notification.Name("com.strawdynamics.rcam.selectCamera"),
                 object: key,
                 userInfo: nil,
                 deliverImmediately: true
@@ -89,7 +89,7 @@ struct CLIMain {
     static func usage() {
         print("""
         usage: rcamcli <command>
-          probe-device [--frames N] [--dump-luma]         assert "RTSP Camera" exists and animates (default 30)
+          probe-device [--frames N] [--dump-luma]         assert "RCam" exists and animates (default 30)
                                                           --dump-luma prints per-frame luma + signature
           capture <rtsp-url> [--seconds N] [--out <dir>]  decode RTSP, save every 30th frame as PNG
           stress <rtsp-url> [--cycles N] [--hold S] [--reuse]

@@ -2,10 +2,10 @@ import Foundation
 import AVFoundation
 import CoreVideo
 
-/// `rcamcli probe-device`: assert the "RTSP Camera" virtual device exists,
+/// `rcamcli probe-device`: assert the "RCam" virtual device exists,
 /// capture frames from it, and assert 1280x720 with live (animating) content.
 enum ProbeDevice {
-    static let deviceName = "RTSP Camera"
+    static let deviceName = "RCam"
 
     static func run(frameTarget: Int, dumpLuma: Bool = false) -> Int32 {
         guard requestCameraAccess() else {

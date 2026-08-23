@@ -30,7 +30,7 @@ import os.log
 /// anything published.
 final class RCamController: ObservableObject {
     static let unwatchedGrace: TimeInterval = 10
-    static let selectNotification = Notification.Name("com.paulstraw.rcam.selectCamera")
+    static let selectNotification = Notification.Name("com.strawdynamics.rcam.selectCamera")
 
     @Published var statusText = "starting…"
     /// The camera currently delivering frames to the virtual device, if any.
@@ -38,7 +38,7 @@ final class RCamController: ObservableObject {
 
     let config = ConfigStore()
 
-    private let log = Logger(subsystem: "com.paulstraw.rcam", category: "Controller")
+    private let log = Logger(subsystem: "com.strawdynamics.rcam", category: "Controller")
     private let sinkWriter = SinkWriter()
     private let switchLock = NSLock()
     private var activeSource: RTSPSource?      // feeding the sink
@@ -46,7 +46,7 @@ final class RCamController: ObservableObject {
     private var pollTimer: Timer?
     private var unwatchedSince: Date?
     private var lastPollDiagnostic = ""
-    private let teardownQueue = DispatchQueue(label: "com.paulstraw.rcam.teardown")
+    private let teardownQueue = DispatchQueue(label: "com.strawdynamics.rcam.teardown")
 
     // Reconnect backoff (1s → 2s → 4s … capped at 30s), driven by the 1s poll.
     private var backoffSeconds: TimeInterval = 1
@@ -90,7 +90,7 @@ final class RCamController: ObservableObject {
 
         // Test hook for launch-at-login (the Settings toggle uses the same call).
         DistributedNotificationCenter.default().addObserver(
-            forName: Notification.Name("com.paulstraw.rcam.setLaunchAtLogin"),
+            forName: Notification.Name("com.strawdynamics.rcam.setLaunchAtLogin"),
             object: nil, queue: .main
         ) { [weak self] note in
             self?.setLaunchAtLogin((note.object as? String) == "1")
