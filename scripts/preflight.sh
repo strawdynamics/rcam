@@ -48,6 +48,25 @@ if [[ "$VENDORED_DYLIBS" != "$EMBEDDED_DYLIBS" ]]; then
   exit 1
 fi
 
+# Every embedded dylib needs a dSYM beside it whose UUID matches, or App Store
+# Connect refuses the symbol upload for that library and its frames stay
+# unsymbolicated in every crash report. Checked here rather than only in
+# build-ffmpeg.sh because the dylibs are committed: a clone can have the
+# libraries without ever running the recipe that produces the symbols.
+for dylib in vendor/ffmpeg/lib/lib*.[0-9]*.dylib; do
+  dsym="$dylib.dSYM"
+  if [[ ! -d "$dsym" ]]; then
+    echo "error: $(basename "$dylib") has no dSYM -- run scripts/build-ffmpeg.sh" >&2
+    exit 1
+  fi
+  if [[ "$(dwarfdump --uuid "$dylib" | awk '{print $2; exit}')" \
+     != "$(dwarfdump --uuid "$dsym" | awk '{print $2; exit}')" ]]; then
+    echo "error: $(basename "$dsym") does not match $(basename "$dylib") -- stale dSYM" >&2
+    echo "       Re-run scripts/build-ffmpeg.sh." >&2
+    exit 1
+  fi
+done
+
 # LGPL-2.1 §6(b) is only satisfied while FFmpeg is actually separable. A static
 # build would link and archive silently -- and quietly withdraw the thing the
 # acknowledgements panel tells the user they have.

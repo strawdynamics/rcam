@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/paulstraw/dev/rcam/vendor/ffmpeg/lib/libavutil.59.dylib'
+relocations:     []
+...

@@ -53,6 +53,13 @@ rm -rf "$PREFIX/lib" "$PREFIX/include"
   `# set is installed, without depending on the loading binary's rpaths.` \
   --extra-ldflags="-mmacosx-version-min=$MACOS_MIN -Wl,-rpath,@loader_path" \
   --install-name-dir='@rpath' \
+  `# FFmpeg strips with "strip -x" on install, which drops the debug map (the` \
+  `# N_OSO/N_SO stabs pointing at the .o files) along with the local symbols.` \
+  `# dsymutil reads exactly that map, so a stripped-on-install dylib yields a` \
+  `# dSYM with the right UUID and no symbols in it -- and App Store Connect` \
+  `# rejects the symbol upload for every one of them. Keep the map, generate` \
+  `# the dSYMs below, and strip afterwards, which is the order Xcode uses.` \
+  --disable-stripping \
   --disable-everything \
   --enable-shared \
   --disable-static \
@@ -95,6 +102,22 @@ for lib in avformat avcodec avutil; do
   ln -sf "$soname" "$PREFIX/lib/lib$lib.dylib"
 done
 
+# Symbols. App Store Connect asks for a DWARF file for every Mach-O in the
+# upload and warns loudly per library when one is missing, so these are not
+# optional extras -- and a beta whose crash reports stop at the FFmpeg frontier
+# is a beta that cannot diagnose its own decode path.
+#
+# Order matters: dsymutil pulls the DWARF out of the .o files via the debug map
+# in each dylib, so it has to run before the strip that removes that map. The
+# strip is safe afterwards -- it does not touch LC_UUID, which is what ties the
+# dSYM to the binary.
+for lib in avformat avcodec avutil; do
+  dylib="$PREFIX/lib/$(basename "$(readlink "$PREFIX/lib/lib$lib.dylib")")"
+  rm -rf "$dylib.dSYM"
+  dsymutil "$dylib" -o "$dylib.dSYM"
+  strip -x "$dylib"
+done
+
 echo "=== Installed shared libs ==="
 ls -la "$PREFIX/lib"/*.dylib
 
@@ -119,9 +142,27 @@ for lib in avformat avcodec avutil; do
     exit 1
   fi
 
+  # A dSYM whose UUID does not match its dylib is worse than none: the upload
+  # warning goes away and the crash reports stay unsymbolicated. And a dSYM
+  # built from a stripped binary has the right UUID and nothing in it, which is
+  # exactly the shape this guard exists to catch.
+  dsym="$dylib.dSYM"
+  dsym_uuid="$(dwarfdump --uuid "$dsym" 2>/dev/null | awk '{print $2; exit}')"
+  dylib_uuid="$(dwarfdump --uuid "$dylib" 2>/dev/null | awk '{print $2; exit}')"
+  if [[ -z "$dsym_uuid" || "$dsym_uuid" != "$dylib_uuid" ]]; then
+    echo "error: $(basename "$dsym") UUID '$dsym_uuid' does not match the dylib's '$dylib_uuid'" >&2
+    exit 1
+  fi
+  symbols="$(dwarfdump --debug-info "$dsym" 2>/dev/null | grep -c DW_TAG_subprogram || true)"
+  if [[ "$symbols" -lt 100 ]]; then
+    echo "error: $(basename "$dsym") carries only $symbols subprograms -- the debug map was" >&2
+    echo "       stripped before dsymutil ran. Check --disable-stripping in ./configure." >&2
+    exit 1
+  fi
+
   lipo -info "$dylib"
 done
-echo "All libs stamped minos $MACOS_MIN with @rpath install names"
+echo "All libs stamped minos $MACOS_MIN with @rpath install names and matching dSYMs"
 
 # project.yml names these files literally in the Frameworks copy phase, so a
 # soname bump on an FFmpeg upgrade has to be noticed here rather than at the

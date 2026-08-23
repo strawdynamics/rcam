@@ -81,6 +81,32 @@ if [[ "$app_v" != "$ext_v" ]]; then
 fi
 echo "Nested bundle versions agree ($app_v)"
 
+# Xcode only puts dSYMs in the archive for targets it built. FFmpeg is copied
+# in prebuilt, so its three dylibs arrive with no symbols and App Store Connect
+# answers with one "Upload Symbols Failed" per library. Copy ours in next to
+# the ones Xcode generated.
+#
+# The UUID is the whole contract -- Apple matches dSYM to binary by UUID, not by
+# name -- so verify against the dylib as it sits in the archive rather than
+# trusting that vendor/ still holds what was linked into this build.
+for dylib in "$APP/Contents/Frameworks"/*.dylib; do
+  name="$(basename "$dylib")"
+  dsym="vendor/ffmpeg/lib/$name.dSYM"
+  if [[ ! -d "$dsym" ]]; then
+    echo "error: no $dsym to accompany the embedded $name -- run scripts/build-ffmpeg.sh" >&2
+    exit 1
+  fi
+  archive_uuid="$(dwarfdump --uuid "$dylib" | awk '{print $2; exit}')"
+  dsym_uuid="$(dwarfdump --uuid "$dsym" | awk '{print $2; exit}')"
+  if [[ "$archive_uuid" != "$dsym_uuid" ]]; then
+    echo "error: $name in the archive is UUID $archive_uuid, but $dsym is $dsym_uuid" >&2
+    echo "       The vendored dSYMs are stale -- re-run scripts/build-ffmpeg.sh." >&2
+    exit 1
+  fi
+  ditto "$dsym" "$ARCHIVE/dSYMs/$name.dSYM"
+done
+echo "Bundled dSYMs: $(cd "$ARCHIVE/dSYMs" && ls -d *.dSYM | tr '\n' ' ')"
+
 cat > "$OUT/ExportOptions.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
