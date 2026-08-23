@@ -6,7 +6,7 @@ import os.log
 final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionRequestDelegate {
     static let extensionIdentifier = "com.strawdynamics.rcam.extension"
 
-    @Published var status = "not installed"
+    @Published var status = "Not installed"
 
     private let log = Logger(subsystem: "com.strawdynamics.rcam", category: "ExtensionManager")
 
@@ -26,7 +26,7 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
         )
         request.delegate = self
         OSSystemExtensionManager.shared.submitRequest(request)
-        status = "activation requested…"
+        status = "Activation requested…"
         log.info("Submitted activation request for \(Self.extensionIdentifier, privacy: .public)")
     }
 
@@ -42,7 +42,7 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
     }
 
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-        status = "needs approval in System Settings → Privacy & Security"
+        status = "Needs approval in System Settings → Privacy & Security"
         log.info("Activation needs user approval")
     }
 
@@ -52,17 +52,17 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
     ) {
         switch result {
         case .completed:
-            status = "activated"
+            status = "Activated"
         case .willCompleteAfterReboot:
-            status = "will activate after reboot"
+            status = "Will activate after reboot"
         @unknown default:
-            status = "finished (result \(result.rawValue))"
+            status = "Finished (result \(result.rawValue))"
         }
         log.info("Activation finished with result \(result.rawValue)")
     }
 
     func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
-        status = "failed: \(error.localizedDescription)"
+        status = "Failed: \(error.localizedDescription)"
         log.error("Activation failed: \(error.localizedDescription, privacy: .public)")
     }
 }

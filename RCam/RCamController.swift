@@ -32,7 +32,7 @@ final class RCamController: ObservableObject {
     static let unwatchedGrace: TimeInterval = 10
     static let selectNotification = Notification.Name("com.strawdynamics.rcam.selectCamera")
 
-    @Published var statusText = "starting…"
+    @Published var statusText = "Starting…"
     /// The camera currently delivering frames to the virtual device, if any.
     @Published private(set) var streamingCameraID: UUID?
 
@@ -60,7 +60,7 @@ final class RCamController: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard granted else {
-                    self.statusText = "camera access denied — enable in System Settings"
+                    self.statusText = "Camera access denied — enable in System Settings"
                     self.log.error("camera access denied; cannot reach the virtual device")
                     return
                 }
@@ -174,7 +174,7 @@ final class RCamController: ObservableObject {
 
     private func poll() {
         guard let device = CMIOHelpers.findDevice(uid: SinkWriter.deviceUID) else {
-            statusText = "virtual camera not installed"
+            statusText = "Virtual camera not installed"
             diagnose("device not found; visible UIDs: \(CMIOHelpers.allDeviceUIDs())")
             return
         }
@@ -200,18 +200,18 @@ final class RCamController: ObservableObject {
                 log.info("unwatched — disconnecting in \(Self.unwatchedGrace)s unless a client returns")
             }
         } else {
-            statusText = config.cameras.isEmpty ? "no cameras configured" : "idle (no clients)"
+            statusText = config.cameras.isEmpty ? "No cameras configured" : "Idle (no clients)"
         }
     }
 
     private func connectSelected(device: CMIOObjectID) {
         guard let camera = config.selectedCamera else {
-            statusText = "no camera selected"
+            statusText = "No camera selected"
             return
         }
         log.info("watched — attaching sink, connecting \(camera.name, privacy: .public)")
         guard sinkWriter.start() else {
-            statusText = "sink attach failed"
+            statusText = "Sink attach failed"
             return
         }
         CMIOHelpers.writeCustomString(device: device, code: "rnam", value: camera.name)
@@ -241,7 +241,7 @@ final class RCamController: ObservableObject {
         unwatchedSince = nil
         backoffSeconds = 1
         nextReconnectAllowed = .distantPast
-        statusText = "idle (no clients)"
+        statusText = "Idle (no clients)"
     }
 
     // MARK: - Overlap switching
@@ -306,9 +306,9 @@ final class RCamController: ObservableObject {
                 case .idle:
                     break
                 case .connecting:
-                    self.statusText = "connecting to \(camera.name)…"
+                    self.statusText = "Connecting to \(camera.name)…"
                 case .streaming:
-                    self.statusText = "streaming \(camera.name)"
+                    self.statusText = "Streaming \(camera.name)"
                     self.streamingCameraID = camera.id
                     self.backoffSeconds = 1
                 case .failed(let message):
