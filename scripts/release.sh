@@ -34,6 +34,12 @@ VERSION_FILE=Configs/Version.xcconfig
 
 mkdir -p "$OUT" Configs
 
+# Same cross-file contracts build.sh enforces. They matter more here: this is
+# the build strangers run, and two of the three (the FFmpeg version in the
+# acknowledgements panel, the dylibs actually embedded in Contents/Frameworks)
+# are what the LGPL notice in that panel claims to be true.
+source scripts/preflight.sh
+
 # Restore whatever the dev loop had stamped, so a bare xcodebuild afterwards
 # does not silently inherit the release stamp.
 RESTORE=""
