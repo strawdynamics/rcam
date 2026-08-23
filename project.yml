@@ -100,6 +100,9 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleName: RCam
+        # App Store Connect rejects a system extension without this key
+        # (error 90940), even though CFBundleName is already set.
+        CFBundleDisplayName: RCam
         NSSystemExtensionUsageDescription: RCam provides a virtual camera device.
         CMIOExtension:
           CMIOExtensionMachServiceName: $(TeamIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)
