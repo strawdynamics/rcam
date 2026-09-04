@@ -12,6 +12,13 @@ import os.log
 /// the sink (with a "Connecting…" badge signaled to the extension) until the
 /// new source delivers its first frame.
 ///
+/// Every connect attempt is a switch. The initial connect (and each retry
+/// after a failure) is a switch from nothing: the source sits in
+/// `pendingSource` with the extension's `connecting` flag raised, so the
+/// extension shows "Connecting — <name>…" rather than "No signal" until the
+/// first frame promotes it. A failed pending source retires the old active
+/// one too — the user picked the new camera, so the old feed must not linger.
+///
 /// **Threading contract.** Two disciplines, deliberately:
 ///
 /// - *Main-thread only*: `unwatchedSince`, `backoffSeconds`,
@@ -23,7 +30,7 @@ import os.log
 ///   two members the decode thread also reaches. Every read and write of them
 ///   takes the lock, including the identity checks in `onFrame`.
 ///
-/// `completeSwitch` and `setSwitching` are called from the decode thread on
+/// `completeSwitch` and `setConnecting` are called from the decode thread on
 /// purpose: promoting the pending source has to happen on the frame that
 /// proves it is alive, not a poll tick later. They confine themselves to
 /// `switchLock`-guarded state and CMIO property writes, and hop to main for
@@ -150,12 +157,12 @@ final class RCamController: ObservableObject {
     /// User (or scripted) camera selection.
     func select(_ camera: CameraConfig) {
         switchLock.lock()
-        let streamingNow = activeSource != nil
+        let hasSource = activeSource != nil || pendingSource != nil
         switchLock.unlock()
 
         // Re-picking the camera that just failed is meaningful: it is nil'd
-        // from `activeSource` on failure, so `!streamingNow` lets it through.
-        guard camera.id != config.selectedID || !streamingNow else { return }
+        // from both slots on failure, so `!hasSource` lets it through.
+        guard camera.id != config.selectedID || !hasSource else { return }
         log.info("selecting camera \(camera.name, privacy: .public)")
         config.selectedID = camera.id
 
@@ -169,10 +176,12 @@ final class RCamController: ObservableObject {
         backoffSeconds = 1
         nextReconnectAllowed = .distantPast
 
-        if streamingNow {
+        if hasSource {
+            // Also covers a selection made while the initial connect is still
+            // pending: `beginSwitch` supersedes the pending source.
             beginSwitch(to: camera)
         }
-        // Not streaming: the next watched poll connects to the new selection.
+        // No source at all: the next watched poll connects to the new selection.
     }
 
     // MARK: - Watched polling
@@ -220,10 +229,14 @@ final class RCamController: ObservableObject {
             return
         }
         CMIOHelpers.writeCustomString(device: device, code: "rnam", value: camera.name)
+        setConnecting(true)
 
-        let source = makeSource(for: camera, isPending: false)
+        // Pending, not active: the first frame promotes it via `completeSwitch`,
+        // which is also what clears the connecting flag. Until then the
+        // extension has no video and shows the "Connecting" placeholder.
+        let source = makeSource(for: camera)
         switchLock.lock()
-        activeSource = source
+        pendingSource = source
         switchLock.unlock()
         source.start()
     }
@@ -241,7 +254,7 @@ final class RCamController: ObservableObject {
             oldPending?.stop()
         }
         sinkWriter.stop()
-        setSwitching(false)
+        setConnecting(false)
         streamingCameraID = nil
         unwatchedSince = nil
         backoffSeconds = 1
@@ -253,12 +266,12 @@ final class RCamController: ObservableObject {
 
     private func beginSwitch(to camera: CameraConfig) {
         log.info("switching to \(camera.name, privacy: .public) — overlap until first frame")
-        setSwitching(true)
+        setConnecting(true)
         if let device = CMIOHelpers.findDevice(uid: SinkWriter.deviceUID) {
             CMIOHelpers.writeCustomString(device: device, code: "rnam", value: camera.name)
         }
 
-        let newSource = makeSource(for: camera, isPending: true)
+        let newSource = makeSource(for: camera)
         switchLock.lock()
         // A previous pending switch loses the race — tear it down.
         let superseded = pendingSource
@@ -284,11 +297,11 @@ final class RCamController: ObservableObject {
         if let old {
             teardownQueue.async { old.stop() }
         }
-        setSwitching(false)
+        setConnecting(false)
         log.info("switch complete — new source live")
     }
 
-    private func makeSource(for camera: CameraConfig, isPending: Bool) -> RTSPSource {
+    private func makeSource(for camera: CameraConfig) -> RTSPSource {
         let source = RTSPSource(url: ConfigStore.resolvedURL(for: camera),
                                 fill: camera.fit == .fill)
         source.onFrame = { [weak self, weak source] pixelBuffer, _ in
@@ -335,20 +348,35 @@ final class RCamController: ObservableObject {
         return source
     }
 
-    /// A source died (stream stall, camera reboot, network drop). Keep the
-    /// sink attached — the extension shows "No signal — <name>" — and let the
-    /// poll retry with exponential backoff.
+    /// A source died (stream stall, camera reboot, network drop) or never came
+    /// up. Keep the sink attached — the extension shows "No signal — <name>"
+    /// while we wait — and let the poll retry with exponential backoff.
+    ///
+    /// A pending source that fails takes the active one down with it. The
+    /// selection already points at the new camera; leaving the old feed
+    /// running would show one camera's video under another's name, and the
+    /// poll would never retry because it still saw a live source.
     private func handleSourceFailure(_ source: RTSPSource, camera: CameraConfig) {
         switchLock.lock()
         let wasActive = activeSource === source
         let wasPending = pendingSource === source
-        if wasActive { activeSource = nil }
+        let retiredActive = wasPending ? activeSource : nil
+        if wasActive || wasPending { activeSource = nil }
         if wasPending { pendingSource = nil }
         switchLock.unlock()
         guard wasActive || wasPending else { return }
 
-        teardownQueue.async { source.stop() }
-        if wasPending { setSwitching(false) }
+        teardownQueue.async {
+            source.stop()
+            retiredActive?.stop()
+        }
+        if wasPending {
+            setConnecting(false)
+            if retiredActive != nil {
+                log.info("switch to \(camera.name, privacy: .public) failed — retiring the previous source")
+                streamingCameraID = nil
+            }
+        }
 
         let delay = backoffSeconds
         nextReconnectAllowed = Date().addingTimeInterval(delay)
@@ -356,7 +384,9 @@ final class RCamController: ObservableObject {
         log.info("source \(camera.name, privacy: .public) failed — reconnect allowed in \(delay, format: .fixed(precision: 0))s (backoff)")
     }
 
-    private func setSwitching(_ on: Bool) {
+    /// Raise or clear the extension's "connect attempt in flight" flag. The
+    /// fourcc predates the wider meaning (it began as switching-only).
+    private func setConnecting(_ on: Bool) {
         guard let device = CMIOHelpers.findDevice(uid: SinkWriter.deviceUID) else { return }
         CMIOHelpers.writeCustomString(device: device, code: "rswt", value: on ? "1" : "0")
     }

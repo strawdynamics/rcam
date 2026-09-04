@@ -72,10 +72,13 @@ final class RCamProviderSource: NSObject, CMIOExtensionProviderSource {
 
 final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
     // Custom properties (device scope). Format: 4cc_<fourcc>_glob_0000.
-    // Both are strings: watched is "0"/"1" so the app-side read path is uniform.
+    // All strings: the flags are "0"/"1" so the app-side read path is uniform.
     static let watchedProperty = CMIOExtensionProperty(rawValue: "4cc_rwch_glob_0000")
     static let cameraNameProperty = CMIOExtensionProperty(rawValue: "4cc_rnam_glob_0000")
-    static let switchingProperty = CMIOExtensionProperty(rawValue: "4cc_rswt_glob_0000")
+    /// "1" while the app has an RTSP connect attempt in flight — the initial
+    /// connect as well as an overlap switch. The fourcc predates the wider
+    /// meaning; it stays for wire compatibility with older app builds.
+    static let connectingProperty = CMIOExtensionProperty(rawValue: "4cc_rswt_glob_0000")
 
     private(set) var device: CMIOExtensionDevice!
     private var sourceStreamSource: RCamSourceStreamSource!
@@ -85,7 +88,7 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private var streamingCounter = 0
     private var sinkConnected = false
     private var activeCameraName = ""
-    private var switching = false
+    private var connecting = false
     private let debugBars = ProcessInfo.processInfo.environment["RCAM_TEST_BARS"] != nil
 
     private let timerQueue = DispatchQueue(label: "com.strawdynamics.rcam.extension.emit",
@@ -165,7 +168,7 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
 
     var availableProperties: Set<CMIOExtensionProperty> {
         [.deviceTransportType, .deviceModel,
-         Self.watchedProperty, Self.cameraNameProperty, Self.switchingProperty]
+         Self.watchedProperty, Self.cameraNameProperty, Self.connectingProperty]
     }
 
     func deviceProperties(
@@ -195,13 +198,13 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
                 forProperty: Self.cameraNameProperty
             )
         }
-        if properties.contains(Self.switchingProperty) {
+        if properties.contains(Self.connectingProperty) {
             stateLock.lock()
-            let switchingNow = switching
+            let connectingNow = connecting
             stateLock.unlock()
             deviceProperties.setPropertyState(
-                CMIOExtensionPropertyState(value: (switchingNow ? "1" : "0") as NSString),
-                forProperty: Self.switchingProperty
+                CMIOExtensionPropertyState(value: (connectingNow ? "1" : "0") as NSString),
+                forProperty: Self.connectingProperty
             )
         }
         return deviceProperties
@@ -215,12 +218,12 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
             stateLock.unlock()
             extensionLog.info("activeCameraName set to \(name, privacy: .public)")
         }
-        if let state = deviceProperties.propertiesDictionary[Self.switchingProperty],
+        if let state = deviceProperties.propertiesDictionary[Self.connectingProperty],
            let raw = state.value as? String {
             stateLock.lock()
-            switching = raw == "1"
+            connecting = raw == "1"
             stateLock.unlock()
-            extensionLog.info("switching set to \(raw, privacy: .public)")
+            extensionLog.info("connecting set to \(raw, privacy: .public)")
         }
     }
 
@@ -271,11 +274,11 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
     /// (sink merely stale) → placeholder. Timestamps are derived from the tick
     /// index — monotonic, evenly spaced, never a source PTS.
     private func emitFrame() {
-        var pixelBuffer = nextOutputBuffer()
-        stateLock.lock()
-        let switchingNow = switching
-        stateLock.unlock()
-        if switchingNow, let base = pixelBuffer, let badged = withConnectingBadge(base) {
+        let (base, connectingNow) = nextOutputBuffer()
+        var pixelBuffer = base
+        // A connect attempt over live video gets a badge; over a placeholder
+        // the placeholder itself already says "Connecting".
+        if connectingNow, let base, let badged = withConnectingBadge(base) {
             pixelBuffer = badged
         }
         guard let pixelBuffer else {
@@ -315,32 +318,39 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
         )
     }
 
-    private func nextOutputBuffer() -> CVPixelBuffer? {
+    /// Returns the frame to emit and whether it is video that still wants the
+    /// "Connecting…" badge (a placeholder never does — it carries its own text).
+    private func nextOutputBuffer() -> (CVPixelBuffer?, badge: Bool) {
         stateLock.lock()
         let fresh = pendingSinkFrame
         pendingSinkFrame = nil
         let lastGood = lastGoodFrame
         let sinkAge = monotonicNow() - lastSinkArrival
         let connected = sinkConnected
+        let connectingNow = connecting
         let name = activeCameraName
         stateLock.unlock()
 
         if let fresh {
-            return fresh
+            return (fresh, connectingNow)
         }
         if connected {
             // RTSP stalls are normal — hold the last-good frame while merely
-            // stale, drop to "No signal" only when the stream looks dead.
+            // stale, drop to the placeholder only when the stream looks dead.
             if let lastGood, sinkAge < sinkStaleThreshold {
-                return lastGood
+                return (lastGood, connectingNow)
             }
+            // No video to show. "Connecting" while the app has an attempt in
+            // flight (first connect, or a retry after a failure); "No signal"
+            // while it is waiting out reconnect backoff or the stream died.
             let label = name.isEmpty ? "camera" : name
-            return PlaceholderRenderer.textFrame(lines: ["No signal — \(label)"])
+            let text = connectingNow ? "Connecting — \(label)…" : "No signal — \(label)"
+            return (PlaceholderRenderer.textFrame(lines: [text]), false)
         }
         if debugBars {
-            return testPattern.nextFrame()
+            return (testPattern.nextFrame(), false)
         }
-        return PlaceholderRenderer.textFrame(lines: ["Open RCam to select a source"])
+        return (PlaceholderRenderer.textFrame(lines: ["Open RCam to select a source"]), false)
     }
 
     /// Sink stream hands decoded frames in here.
