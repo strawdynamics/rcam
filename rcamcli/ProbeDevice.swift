@@ -3,7 +3,8 @@ import AVFoundation
 import CoreVideo
 
 /// `rcamcli probe-device`: assert the "RCam" virtual device exists,
-/// capture frames from it, and assert 1280x720 with live (animating) content.
+/// capture frames from it, and assert the frames match the size the device
+/// advertises, with live (animating) content.
 enum ProbeDevice {
     static let deviceName = "RCam"
 
@@ -52,6 +53,12 @@ enum ProbeDevice {
 
         session.startRunning()
         let done = collector.wait(timeout: .now() + .seconds(15 + frameTarget / 30))
+        // Read the advertised size while the session is still running: this is
+        // what the device *claims* to emit, and the frames are checked against
+        // it rather than against a literal. The extension builds each frame's
+        // format description from the buffer it is about to send, so "declared
+        // size != emitted size" is a failure this probe has to be able to see.
+        let advertised = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
         session.stopRunning()
 
         guard done else {
@@ -63,16 +70,21 @@ enum ProbeDevice {
                 print(String(format: "luma[%d]=%.1f sig=%016llx t=%.3f", index, stat.luma, stat.signature, stat.arrival))
             }
         }
-        return assess(stats: collector.stats, frameTarget: frameTarget)
+        return assess(stats: collector.stats, frameTarget: frameTarget, advertised: advertised)
     }
 
-    private static func assess(stats: [FrameStat], frameTarget: Int) -> Int32 {
+    private static func assess(stats: [FrameStat],
+                               frameTarget: Int,
+                               advertised: CMVideoDimensions) -> Int32 {
         var failures = [String]()
         if stats.count < frameTarget {
             failures.append("collected \(stats.count) frames, wanted \(frameTarget)")
         }
-        if let bad = stats.first(where: { $0.width != 1280 || $0.height != 720 }) {
-            failures.append("unexpected dimensions \(bad.width)x\(bad.height), wanted 1280x720")
+        let wantWidth = Int(advertised.width)
+        let wantHeight = Int(advertised.height)
+        if let bad = stats.first(where: { $0.width != wantWidth || $0.height != wantHeight }) {
+            failures.append("frame is \(bad.width)x\(bad.height) but the device advertises "
+                            + "\(wantWidth)x\(wantHeight)")
         }
         let pairCount = max(stats.count - 1, 1)
         let signatures = stats.map(\.signature)
@@ -99,7 +111,7 @@ enum ProbeDevice {
                             + "the device is cycling a few cached buffers, not streaming")
         }
         if failures.isEmpty {
-            print("OK: \(stats.count) frames, 1280x720, live")
+            print("OK: \(stats.count) frames, \(wantWidth)x\(wantHeight), live")
             return 0
         }
         if longestStaticRun >= runLimit || distinct < distinctFloor {
@@ -116,7 +128,9 @@ enum ProbeDevice {
 
     /// Frames of unbroken repetition that count as "frozen".
     ///
-    /// Measured ground truth at 1280x720/30fps (2026-08-22, 300-frame samples):
+    /// Measured ground truth on 2026-08-22 at 1280x720/30fps, the output size
+    /// at the time, from 300-frame samples. These are frame counts, so they do
+    /// not change with resolution:
     ///
     ///   frozen "No signal" placeholder   distinct=1     longestStaticRun=300 (the whole sample)
     ///   live rig (testsrc, 30fps)        distinct=262   longestStaticRun=1-2
