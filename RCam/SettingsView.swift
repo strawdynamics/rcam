@@ -78,6 +78,33 @@ struct GeneralPane: View {
         return "\(short) (\(build))"
     }
 
+    /// The App Store's write-a-review page for RCam. The number is the app's
+    /// Apple ID from App Store Connect; `action=write-review` opens straight
+    /// into the review sheet instead of the product page.
+    static let writeReviewURL = URL(string: "https://apps.apple.com/app/id6804344210?action=write-review")!
+
+    /// A prefilled support email. The body carries what a bug report always
+    /// gets asked for -- build, macOS version, extension state -- all of it
+    /// already on screen in this pane, so nothing here is news to the user.
+    private var supportMailURL: URL {
+        let body = """
+
+
+            --
+            RCam \(Self.versionString)
+            macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
+            Extension: \(extensionManager.status)
+            """
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = "rcam@paulstraw.com"
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: "RCam support"),
+            URLQueryItem(name: "body", value: body),
+        ]
+        return components.url!
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if let error = config.persistenceError {
@@ -149,6 +176,26 @@ struct GeneralPane: View {
                 } label: {
                     Text("Acknowledgements")
                     Text("FFmpeg \(Acknowledgements.ffmpegVersion), under the LGPL.")
+                }
+
+                // Shown to free and unlocked users alike: the support link is
+                // most useful to exactly the people the watermark annoys.
+                LabeledContent {
+                    HStack(spacing: 12) {
+                        Button("Review") {
+                            NSWorkspace.shared.open(Self.writeReviewURL)
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        Button("Contact support") {
+                            NSWorkspace.shared.open(supportMailURL)
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                } label: {
+                    Text("Enjoying RCam?")
+                    Text("Reviews help other people find RCam.")
                 }
             }
 
