@@ -6,7 +6,7 @@ A macOS menu bar app that turns RTSP camera streams (security cams, IP cams) int
 
 Two halves:
 
-- **RCam** (menu bar app): connects to the selected camera over RTSP (TCP), demuxes with a minimal FFmpeg build, hardware-decodes H.264 via VideoToolbox, and pushes 1280×720@30 NV12 frames into the extension's sink stream via the CoreMediaIO C API. Camera config lives in JSON (no credentials); credentials live in the Keychain.
+- **RCam** (menu bar app): connects to the selected camera over RTSP (TCP), demuxes with a minimal FFmpeg build, hardware-decodes H.264 via VideoToolbox, and pushes 1920×1080@30 NV12 frames into the extension's sink stream via the CoreMediaIO C API. Camera config lives in JSON (no credentials); credentials live in the Keychain.
 - **RCamExtension** (CMIO camera extension): owns a 30 Hz clock and always emits a frame — fresh sink frame, last-good frame, or a rendered placeholder — so clients never see a stall, even if the stream (or the app) dies mid-call.
 
 The app only holds an RTSP connection while something is actually watching the virtual camera, and disconnects after a short grace period. Reconnects use exponential backoff and handle sleep/wake.

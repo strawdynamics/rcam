@@ -1,13 +1,13 @@
 import Foundation
 import CoreVideo
 
-/// Animated 720p NV12 test pattern: horizontally scrolling color bars with a
+/// Animated 1080p NV12 test pattern: horizontally scrolling color bars with a
 /// frame counter. Serves as the M1 "no sink" placeholder source.
 final class TestPatternGenerator {
     private let width = Int(kOutputWidth)
     private let height = Int(kOutputHeight)
-    private let barWidth = 160
-    private let shiftPerFrame = 4 // must stay even so chroma pairs stay aligned
+    private let barWidth = 240
+    private let shiftPerFrame = 6 // must stay even so chroma pairs stay aligned
 
     // BT.601-ish YCbCr for SMPTE-style bars.
     private static let bars: [(y: UInt8, cb: UInt8, cr: UInt8)] = [
@@ -41,7 +41,7 @@ final class TestPatternGenerator {
             cTemplate[pair * 2] = bar.cb
             cTemplate[pair * 2 + 1] = bar.cr
         }
-        digits = PlaceholderRenderer.digitGlyphs(pointSize: 64)
+        digits = PlaceholderRenderer.digitGlyphs(pointSize: 96)
 
         let attributes: [CFString: Any] = [
             kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
@@ -91,9 +91,9 @@ final class TestPatternGenerator {
                              cBase: UnsafeMutableRawPointer, cStride: Int) {
         let text = String(frameCount)
         guard let glyphHeight = digits.first?.height, let glyphWidth = digits.first?.width else { return }
-        let padding = 16
-        let originX = 24
-        let originY = 24
+        let padding = 24
+        let originX = 36
+        let originY = 36
         let boxWidth = glyphWidth * text.count + padding * 2
         let boxHeight = glyphHeight + padding * 2
 

@@ -8,7 +8,7 @@ import VideoToolbox
 
 /// RTSP H.264 source: libavformat demux (TCP, low-latency) →
 /// VTDecompressionSession (hardware decode) → VTPixelTransferSession
-/// (scale + letterbox to 1280x720 NV12).
+/// (scale + letterbox to 1920x1080 NV12).
 ///
 /// Threading: every piece of decode state lives in a `DecodeSession` created
 /// and owned by the demux thread inside `runLoop()`, so nothing outside that
@@ -28,7 +28,7 @@ public final class RTSPSource: FrameSource {
     static let stopWaitSeconds: TimeInterval = 6
 
     /// Native properties of the connected stream, as reported by the demuxer
-    /// (before any scaling to the 720p output format).
+    /// (before any scaling to the 1080p output format).
     public struct StreamInfo: Equatable {
         public let width: Int
         public let height: Int
@@ -386,7 +386,7 @@ public final class RTSPSource: FrameSource {
             outputPool = nil
         }
 
-        /// Length-prefixed slices → decode → letterboxed 720p NV12 buffer (or
+        /// Length-prefixed slices → decode → letterboxed 1080p NV12 buffer (or
         /// nil for non-displayable/failed frames — the caller counts those).
         func decode(_ lengthPrefixed: [UInt8]) -> CVPixelBuffer? {
             guard let session = decompressionSession,

@@ -196,7 +196,7 @@ struct FrameStat {
     /// FNV-1a hash of the same sampled Y-plane grid the mean is taken from.
     /// Mean luma is nearly blind to motion confined to part of the frame (a
     /// burned-in clock, a person in a doorway) because it averages the change
-    /// away across ~921k pixels. The hash changes if *any* sampled pixel does,
+    /// away across a couple of million pixels. The hash changes if *any* sampled pixel does,
     /// which is what actually separates a live stream from a frozen one.
     let signature: UInt64
     let arrival: TimeInterval // epoch seconds

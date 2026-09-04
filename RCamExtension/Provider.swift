@@ -4,9 +4,9 @@ import CoreMediaIO
 import CoreVideo
 import os.log
 
-// Fixed output format (locked): 1280x720, 30fps, NV12.
-let kOutputWidth: Int32 = 1280
-let kOutputHeight: Int32 = 720
+// Fixed output format (locked): 1920x1080, 30fps, NV12.
+let kOutputWidth: Int32 = 1920
+let kOutputHeight: Int32 = 1080
 let kFrameRate: Int32 = 30
 
 let extensionLog = Logger(subsystem: "com.strawdynamics.rcam.extension", category: "Provider")
@@ -417,7 +417,7 @@ final class RCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
 
         // Badge bottom-center; neutralize chroma underneath so it reads white.
         let originX = (width - badge.width) / 2
-        let originY = height - badge.height - 48
+        let originY = height - badge.height - 72
         let yPlane = dstY.assumingMemoryBound(to: UInt8.self)
         badge.pixels.withUnsafeBufferPointer { src in
             for row in 0..<badge.height {

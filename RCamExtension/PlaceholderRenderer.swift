@@ -46,8 +46,8 @@ enum PlaceholderRenderer {
             space: CGColorSpaceCreateDeviceGray(),
             bitmapInfo: CGImageAlphaInfo.none.rawValue
         ) {
-            let font = CTFontCreateWithName("Helvetica-Bold" as CFString, 44, nil)
-            let lineHeight: CGFloat = 60
+            let font = CTFontCreateWithName("Helvetica-Bold" as CFString, 66, nil)
+            let lineHeight: CGFloat = 90
             let blockHeight = lineHeight * CGFloat(lines.count)
             for (index, text) in lines.enumerated() {
                 let attributed = NSAttributedString(string: text, attributes: [
@@ -69,7 +69,7 @@ enum PlaceholderRenderer {
 
     /// Small luma bitmap of a text badge (white on dark), rendered once and
     /// cached — blitted onto outgoing frames by the emit loop.
-    static func badge(text: String, pointSize: CGFloat = 28) -> DigitGlyph? {
+    static func badge(text: String, pointSize: CGFloat = 42) -> DigitGlyph? {
         lock.lock()
         defer { lock.unlock() }
         if let cached = badgeCache[text] { return cached }
@@ -81,7 +81,7 @@ enum PlaceholderRenderer {
         ])
         let line = CTLineCreateWithAttributedString(attributed)
         let textWidth = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
-        let padding: CGFloat = 14
+        let padding: CGFloat = 21
         let width = Int(ceil(textWidth + padding * 2))
         let height = Int(ceil(pointSize * 1.4 + padding))
         var pixels = [UInt8](repeating: 22, count: width * height) // dark backdrop

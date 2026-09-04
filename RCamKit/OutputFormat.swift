@@ -8,10 +8,10 @@ import Foundation
 /// own copy so that changing the device format bumps the extension's build
 /// hash (see `scripts/build.sh`). Keep the two in sync.
 public enum OutputFormat {
-    public static let width = 1280
-    public static let height = 720
+    public static let width = 1920
+    public static let height = 1080
     public static let frameRate = 30
 
-    /// "1280 × 720" — uses a real multiplication sign, not an "x".
+    /// "1920 × 1080" — uses a real multiplication sign, not an "x".
     public static var sizeDescription: String { "\(width) × \(height)" }
 }

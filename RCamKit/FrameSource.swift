@@ -11,7 +11,7 @@ public enum FrameSourceState: Equatable {
 }
 
 public protocol FrameSource: AnyObject {
-    /// Delivers 1280x720 NV12 pixel buffers plus their arrival time
+    /// Delivers 1920x1080 NV12 pixel buffers plus their arrival time
     /// (host uptime seconds). Called on an internal queue/thread.
     var onFrame: ((CVPixelBuffer, TimeInterval) -> Void)? { get set }
     var onStateChange: ((FrameSourceState) -> Void)? { get set }
