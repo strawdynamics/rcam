@@ -98,13 +98,12 @@ targets:
         CFBundleDisplayName: RCam
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
-        # App Store Connect requires a category; the archive warns without one.
+        # Finder and Launchpad sort by it, and archiving warns without one.
         LSApplicationCategoryType: public.app-category.video
-        NSHumanReadableCopyright: Copyright (c) 2026 Straw Dynamics. All rights reserved.
+        NSHumanReadableCopyright: Copyright © 2026 Straw Dynamics. MIT License.
         # RCam ships no cryptography of its own: RTSP runs in the clear, and the
-        # only crypto it touches is the OS Keychain. Both are exempt, so this
-        # declaration skips the export-compliance prompt on every TestFlight
-        # build. Re-check if RTSPS/TLS is ever added.
+        # only crypto it touches is the OS Keychain. Both are exempt, and saying
+        # so up front costs nothing. Re-check if RTSPS/TLS is ever added.
         ITSAppUsesNonExemptEncryption: false
     dependencies:
       - target: RCamExtension
@@ -140,8 +139,8 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleName: RCam
-        # App Store Connect rejects a system extension without this key
-        # (error 90940), even though CFBundleName is already set.
+        # Matches the app's name wherever macOS lists the extension. (App Store
+        # Connect also insisted on it -- error 90940 -- despite CFBundleName.)
         CFBundleDisplayName: RCam
         NSSystemExtensionUsageDescription: RCam provides a virtual camera device.
         CMIOExtension:

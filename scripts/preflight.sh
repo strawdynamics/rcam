@@ -48,9 +48,9 @@ if [[ "$VENDORED_DYLIBS" != "$EMBEDDED_DYLIBS" ]]; then
   exit 1
 fi
 
-# Every embedded dylib needs a dSYM beside it whose UUID matches, or App Store
-# Connect refuses the symbol upload for that library and its frames stay
-# unsymbolicated in every crash report. Checked here rather than only in
+# Every embedded dylib needs a dSYM beside it whose UUID matches, or its
+# frames stay unsymbolicated in every crash report and the release's dSYMs
+# zip is missing that library. Checked here rather than only in
 # build-ffmpeg.sh because the dylibs are committed: a clone can have the
 # libraries without ever running the recipe that produces the symbols.
 for dylib in vendor/ffmpeg/lib/lib*.[0-9]*.dylib; do

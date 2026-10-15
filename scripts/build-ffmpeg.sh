@@ -56,8 +56,8 @@ rm -rf "$PREFIX/lib" "$PREFIX/include"
   `# FFmpeg strips with "strip -x" on install, which drops the debug map (the` \
   `# N_OSO/N_SO stabs pointing at the .o files) along with the local symbols.` \
   `# dsymutil reads exactly that map, so a stripped-on-install dylib yields a` \
-  `# dSYM with the right UUID and no symbols in it -- and App Store Connect` \
-  `# rejects the symbol upload for every one of them. Keep the map, generate` \
+  `# dSYM with the right UUID and no symbols in it, which symbolicates` \
+  `# nothing. Keep the map, generate` \
   `# the dSYMs below, and strip afterwards, which is the order Xcode uses.` \
   --disable-stripping \
   --disable-everything \
@@ -102,10 +102,8 @@ for lib in avformat avcodec avutil; do
   ln -sf "$soname" "$PREFIX/lib/lib$lib.dylib"
 done
 
-# Symbols. App Store Connect asks for a DWARF file for every Mach-O in the
-# upload and warns loudly per library when one is missing, so these are not
-# optional extras -- and a beta whose crash reports stop at the FFmpeg frontier
-# is a beta that cannot diagnose its own decode path.
+# Symbols. These are not optional extras: a release whose crash reports stop
+# at the FFmpeg frontier is a release that cannot diagnose its own decode path.
 #
 # Order matters: dsymutil pulls the DWARF out of the .o files via the debug map
 # in each dylib, so it has to run before the strip that removes that map. The
