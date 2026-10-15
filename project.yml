@@ -181,6 +181,7 @@ targets:
       - RCamKit/H264Bitstream.swift
       - RCamKit/StreamHealth.swift
       - RCam/CameraPresets.swift
+      - RCam/InstallLocation.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam.tests
