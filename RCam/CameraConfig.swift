@@ -192,7 +192,10 @@ enum KeychainStore {
         var password: String
     }
 
-    private static let service = "com.strawdynamics.rcam"
+    // The app's own ID, so the shipping build keeps finding the items it
+    // already stored, and a contributor's build under another prefix gets its
+    // own rather than colliding with an installed RCam's.
+    private static let service = Bundle.main.bundleIdentifier!
 
     static func read(cameraID: UUID) -> Credentials? {
         let query: [CFString: Any] = [

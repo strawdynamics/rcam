@@ -37,6 +37,9 @@ import os.log
 /// anything published.
 final class RCamController: ObservableObject {
     static let unwatchedGrace: TimeInterval = 10
+    // Literal on purpose: rcamcli posts it (and setLaunchAtLogin below) under
+    // its own bundle ID, so neither side can derive the other's. It is only a
+    // namespaced name for a debug hook, not a signing identity.
     static let selectNotification = Notification.Name("com.strawdynamics.rcam.selectCamera")
 
     @Published var statusText = "Starting…"
@@ -45,6 +48,9 @@ final class RCamController: ObservableObject {
 
     let config = ConfigStore()
 
+    // Every subsystem stays literal, whatever the bundle ID prefix: the
+    // documented `log show --predicate 'subsystem BEGINSWITH ...'` commands
+    // depend on it, and RCamKit's logger is shared with rcamcli.
     private let log = Logger(subsystem: "com.strawdynamics.rcam", category: "Controller")
     private let sinkWriter = SinkWriter()
     private let switchLock = NSLock()

@@ -10,7 +10,9 @@ import os.log
 /// remembers, keyed by the request. Without it a deactivation that finishes
 /// would report itself as "Activated".
 final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionRequestDelegate {
-    static let extensionIdentifier = "com.strawdynamics.rcam.extension"
+    /// project.yml names the extension `<app bundle ID>.extension`, so derive
+    /// it rather than repeat the prefix a contributor's Local.xcconfig changes.
+    static let extensionIdentifier = Bundle.main.bundleIdentifier! + ".extension"
 
     enum State: Equatable {
         case unknown

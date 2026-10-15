@@ -59,6 +59,7 @@ struct CLIMain {
                 exit(64)
             }
             DistributedNotificationCenter.default().postNotificationName(
+                // Must match RCamController.selectNotification.
                 Notification.Name("com.strawdynamics.rcam.selectCamera"),
                 object: key,
                 userInfo: nil,

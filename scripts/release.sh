@@ -63,6 +63,21 @@ echo "Building RCam $MARKETING ($BUILD) for App Store Connect"
 
 xcodegen generate
 
+# The team and extension bundle ID come from Configs/Signing.xcconfig (or a
+# Local.xcconfig override), so ask Xcode for them rather than repeat them.
+EXTENSION_SETTINGS="$(xcodebuild -project RCam.xcodeproj -target RCamExtension \
+  -configuration Release -showBuildSettings 2>/dev/null)"
+extension_setting() {
+  awk -v key="$1" '$1 == key && $2 == "=" { print $3; exit }' <<< "$EXTENSION_SETTINGS"
+}
+TEAM_ID="$(extension_setting DEVELOPMENT_TEAM)"
+EXTENSION_ID="$(extension_setting PRODUCT_BUNDLE_IDENTIFIER)"
+if [[ -z "$TEAM_ID" || -z "$EXTENSION_ID" ]]; then
+  echo "error: could not read DEVELOPMENT_TEAM / PRODUCT_BUNDLE_IDENTIFIER for RCamExtension" >&2
+  echo "       from xcodebuild -showBuildSettings. Check Configs/Signing.xcconfig." >&2
+  exit 1
+fi
+
 rm -rf "$ARCHIVE" "$EXPORT"
 xcodebuild archive \
   -project RCam.xcodeproj -scheme RCam -configuration Release \
@@ -72,7 +87,7 @@ xcodebuild archive \
 # Fail loudly here rather than at Apple's validator: a mismatch means the
 # version plumbing above stopped working.
 APP="$ARCHIVE/Products/Applications/RCam.app"
-EXT="$APP/Contents/Library/SystemExtensions/com.strawdynamics.rcam.extension.systemextension"
+EXT="$APP/Contents/Library/SystemExtensions/$EXTENSION_ID.systemextension"
 app_v="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Contents/Info.plist")"
 ext_v="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$EXT/Contents/Info.plist")"
 if [[ "$app_v" != "$ext_v" ]]; then
@@ -107,13 +122,13 @@ for dylib in "$APP/Contents/Frameworks"/*.dylib; do
 done
 echo "Bundled dSYMs: $(cd "$ARCHIVE/dSYMs" && ls -d *.dSYM | tr '\n' ' ')"
 
-cat > "$OUT/ExportOptions.plist" <<'PLIST'
+cat > "$OUT/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>method</key><string>app-store-connect</string>
-  <key>teamID</key><string>TK7EDP5B95</string>
+  <key>teamID</key><string>$TEAM_ID</string>
   <key>destination</key><string>export</string>
 </dict>
 </plist>
