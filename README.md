@@ -27,7 +27,6 @@ The vendored FFmpeg libs (demux-only, no decoders) are prebuilt in `vendor/ffmpe
 
 - `scripts/testrig.sh {start|stop}` — local mediamtx + ffmpeg rig serving synthetic H.264 test streams at `rtsp://127.0.0.1:8554/{test,sub}`.
 - `rcamcli` — dev CLI: `probe-device` verifies the virtual camera end-to-end, `capture` tests the RTSP decode path in isolation.
-- `loops/` — dated implementation logs: full spec, architecture decisions, and findings.
 
 ## Layout
 

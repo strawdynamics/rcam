@@ -91,11 +91,17 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
     ///
     /// Expect `.willCompleteAfterReboot`, not `.completed`: on this OS a CMIO
     /// extension's teardown is always deferred to the next boot, even with no
-    /// client attached (measured in loops/20260822-A-RENAME.md). The extension
-    /// process is killed and the device disappears immediately; only the staged
-    /// bundle and the db record survive to be drained at boot. Reporting that
-    /// honestly is the difference between a user rebooting once and a user
-    /// concluding the removal silently failed.
+    /// client attached. Measured 2026-08-22 via `systemextensionsctl uninstall`
+    /// (this `deactivationRequest` path wasn't tested separately): with RCam
+    /// quit, no extension process and `references: []` in
+    /// `/Library/SystemExtensions/db.plist`, sysextd still went
+    /// `activated_enabled -> terminating_for_uninstall ->
+    /// terminated_waiting_to_uninstall_on_reboot`, and `gc` can't shortcut it
+    /// (`sysextd.InternalError Code=5`). The extension process is killed and the
+    /// device disappears immediately; only the staged bundle in
+    /// `/Library/SystemExtensions/<uuid>/` and the db record survive to be
+    /// drained at boot. Reporting that honestly is the difference between a
+    /// user rebooting once and a user concluding the removal silently failed.
     func deactivate() {
         let request = OSSystemExtensionRequest.deactivationRequest(
             forExtensionWithIdentifier: Self.extensionIdentifier,

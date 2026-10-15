@@ -88,7 +88,12 @@ targets:
         # macOS 15 gates outbound LAN connections behind Local Network privacy.
         # Without this string the RTSP connect to a camera on the local subnet
         # fails as EHOSTUNREACH ("No route to host") with no permission prompt
-        # and no hint that TCC is the cause -- see loops/20260822-A-RENAME.md.
+        # and no hint that TCC is the cause. Measured 2026-08-22: after the
+        # bundle-ID change all six LAN cameras failed this way while
+        # `nc -z <cam> 554` succeeded from the shell and loopback streamed
+        # fine. TCC keys the grant on bundle ID, so a new ID starts denied;
+        # re-enable RCam in Privacy & Security > Local Network (or
+        # `tccutil reset LocalNetwork <bundle id>` and relaunch).
         NSLocalNetworkUsageDescription: RCam connects to RTSP cameras on your local network.
         CFBundleDisplayName: RCam
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
