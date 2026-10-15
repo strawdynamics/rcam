@@ -21,7 +21,7 @@ scripts/build.sh
 
 This regenerates the Xcode project, bumps the extension version, builds, and installs `RCam.app` into `/Applications` (the extension can only activate from there). On first launch, approve the extension in System Settings → Privacy & Security.
 
-The vendored FFmpeg libs (demux-only, no decoders) are prebuilt in `vendor/ffmpeg/`; rebuild them with `scripts/build-ffmpeg.sh` if needed. They are shared libraries, embedded in `RCam.app/Contents/Frameworks` and replaceable in place — LGPL-2.1 §6(b), which is what lets RCam ship FFmpeg in a signed App Store bundle at all.
+The vendored FFmpeg libs (demux-only, no decoders) are prebuilt in `vendor/ffmpeg/`; rebuild them with `scripts/build-ffmpeg.sh` if needed. They are shared libraries, embedded in `RCam.app/Contents/Frameworks` and replaceable in place — LGPL-2.1 §6(b), which is what lets RCam ship FFmpeg in a signed app bundle at all.
 
 ## Development
 

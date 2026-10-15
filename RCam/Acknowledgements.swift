@@ -27,11 +27,11 @@ enum Acknowledgements {
         URL(string: "https://ffmpeg.org/releases/ffmpeg-\(ffmpegVersion).tar.xz")!
     }
 
-    /// A public copy of `scripts/build-ffmpeg.sh`. The RCam repo is private, so
-    /// this gist is the only place a user can read how the vendored static libs
-    /// were configured and built.
+    /// `scripts/build-ffmpeg.sh` on `main` in the public repo: the exact
+    /// configure flags and build steps behind the bundled FFmpeg libraries, so a
+    /// user can rebuild them and swap them in.
     static let buildRecipeURL =
-        URL(string: "https://gist.github.com/paulstraw/05d0d7cda9d12bf4122f4bae51227ca7")!
+        URL(string: "https://github.com/strawdynamics/rcam/blob/main/scripts/build-ffmpeg.sh")!
 
     /// The license ships as a bundle resource rather than a Swift literal, so a
     /// copy of it physically accompanies the binary — which is the wording §6
