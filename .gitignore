@@ -3,8 +3,6 @@ build/
 DerivedData/
 vendor/ffmpeg/src/
 RCam.xcodeproj/
-Configs/Version.xcconfig
-Configs/extension-version.txt
 *.xcuserdata/
 *.xcuserdatad/
 .testrig/
@@ -13,4 +11,6 @@ Configs/extension-version.txt
 auto.crt
 auto.key
 build-tsan/
-/Configs
+Configs/Version.xcconfig
+Configs/extension-version.txt
+Configs/Local.xcconfig

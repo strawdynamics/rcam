@@ -1,13 +1,14 @@
 name: RCam
 options:
-  bundleIdPrefix: com.strawdynamics
   deploymentTarget:
     macOS: "15.0"
   createIntermediateGroups: true
 
 settings:
   base:
-    DEVELOPMENT_TEAM: TK7EDP5B95
+    # DEVELOPMENT_TEAM and RCAM_BUNDLE_ID_PREFIX come from
+    # Configs/Signing.xcconfig (see configFiles below). Setting either here
+    # would shadow the xcconfig, and with it a contributor's Local.xcconfig.
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "1.0.1"
@@ -25,9 +26,11 @@ settingGroups:
     # them at runtime -- the app in its bundle, rcamcli in the vendor dir.
     OTHER_LDFLAGS: "-lavformat -lavcodec -lavutil"
 
+# Signing.xcconfig is committed and pulls in the generated Version.xcconfig and
+# the optional, gitignored Local.xcconfig.
 configFiles:
-  Debug: Configs/Version.xcconfig
-  Release: Configs/Version.xcconfig
+  Debug: Configs/Signing.xcconfig
+  Release: Configs/Signing.xcconfig
 
 targets:
   RCam:
@@ -69,7 +72,7 @@ targets:
     settings:
       groups: [ffmpeg]
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam
+        PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
     entitlements:
@@ -116,8 +119,9 @@ targets:
     sources: [RCamExtension]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam.extension
-        PRODUCT_NAME: com.strawdynamics.rcam.extension
+        PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam.extension
+        # Must equal the bundle ID.
+        PRODUCT_NAME: $(PRODUCT_BUNDLE_IDENTIFIER)
         # Deliberately NOT the app's epoch stamp. This version only changes when
         # the extension's own inputs change (see scripts/build.sh); re-activating
         # at an unchanged version is a no-op, which is what keeps the running
@@ -131,7 +135,7 @@ targets:
         # must descend from an app group in the extension's entitlements
         # (verified against sysextd log + OBS's shipping extension).
         com.apple.security.application-groups:
-          - TK7EDP5B95.com.strawdynamics.rcam
+          - $(TeamIdentifierPrefix)$(RCAM_BUNDLE_ID_PREFIX).rcam
     info:
       path: RCamExtension/Info.plist
       properties:
@@ -156,7 +160,7 @@ targets:
     settings:
       groups: [ffmpeg]
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam.cli
+        PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam.cli
         # A bare tool has no bundle to embed FFmpeg in, so it reads the dylibs
         # straight out of the vendor directory. Dev-only, and never shipped.
         LD_RUNPATH_SEARCH_PATHS: "$(SRCROOT)/vendor/ffmpeg/lib"
@@ -179,7 +183,7 @@ targets:
       - RCam/CameraPresets.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam.tests
+        PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam.tests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
