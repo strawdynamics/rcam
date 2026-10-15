@@ -32,6 +32,15 @@ configFiles:
   Debug: Configs/Signing.xcconfig
   Release: Configs/Signing.xcconfig
 
+packages:
+  # Pinned exactly: the sandboxing setup below (entitlements, Info.plist keys)
+  # follows this version's docs, and the EdDSA key was generated with its
+  # generate_keys. Re-read sparkle-project.org/documentation/sandboxing before
+  # bumping.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
+
 targets:
   RCam:
     type: application
@@ -83,6 +92,13 @@ targets:
         com.apple.developer.system-extension.install: true
         # Sandboxed access to CMIO devices (needed to write the sink stream).
         com.apple.security.device.camera: true
+        # Sparkle's sandboxed installer: the app talks to its Installer.xpc
+        # launcher over these two mach services. Sparkle's Downloader.xpc is
+        # deliberately not enabled -- its docs say to use it only when the app
+        # lacks network.client, which RCam has.
+        com.apple.security.temporary-exception.mach-lookup.global-name:
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spks
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spki
     info:
       path: RCam/Info.plist
       properties:
@@ -108,10 +124,20 @@ targets:
         # only crypto it touches is the OS Keychain. Both are exempt, and saying
         # so up front costs nothing. Re-check if RTSPS/TLS is ever added.
         ITSAppUsesNonExemptEncryption: false
+        # Sparkle. The sandbox forbids the app replacing itself, so installs go
+        # through Sparkle's Installer.xpc (see the mach-lookup entitlement).
+        # Checks run on Sparkle's schedule with no first-launch permission
+        # prompt, but an update is never installed without the user's say-so.
+        SUFeedURL: https://rcam.strawdynamics.com/appcast.xml
+        SUPublicEDKey: REPLACE_WITH_SPARKLE_PUBLIC_KEY
+        SUEnableInstallerLauncherService: true
+        SUEnableAutomaticChecks: true
+        SUAutomaticallyUpdate: false
     dependencies:
       - target: RCamExtension
         embed: true
         codeSign: true
+      - package: Sparkle
 
   RCamExtension:
     type: system-extension
