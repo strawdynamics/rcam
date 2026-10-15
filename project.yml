@@ -178,7 +178,6 @@ targets:
       - RCamKit/H264Bitstream.swift
       - RCamKit/StreamHealth.swift
       - RCam/CameraPresets.swift
-      - RCam/Watermark.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam.tests

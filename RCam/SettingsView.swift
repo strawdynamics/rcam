@@ -18,7 +18,7 @@ struct SettingsView: View {
             CamerasPane(config: config, controller: controller)
                 .tabItem { Label("Cameras", systemImage: "video") }
             GeneralPane(config: config, controller: controller,
-                        extensionManager: extensionManager, store: controller.store)
+                        extensionManager: extensionManager)
                 .tabItem { Label("General", systemImage: "gearshape") }
         }
         .frame(minWidth: 640, minHeight: 440)
@@ -66,7 +66,6 @@ struct GeneralPane: View {
     @ObservedObject var config: ConfigStore
     let controller: RCamController
     @ObservedObject var extensionManager: ExtensionManager
-    @ObservedObject var store: Store
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var showAcknowledgements = false
     @State private var confirmRemoveExtension = false
@@ -116,8 +115,6 @@ struct GeneralPane: View {
 
     private var generalForm: some View {
         Form {
-            PurchaseSection(store: store)
-
             Section {
                 Toggle(isOn: $launchAtLogin) {
                     Text("Launch RCam at login")
@@ -178,8 +175,6 @@ struct GeneralPane: View {
                     Text("FFmpeg \(Acknowledgements.ffmpegVersion), under the LGPL.")
                 }
 
-                // Shown to free and unlocked users alike: the support link is
-                // most useful to exactly the people the watermark annoys.
                 LabeledContent {
                     HStack(spacing: 12) {
                         Button("Review") {
@@ -242,90 +237,6 @@ struct GeneralPane: View {
                  You can install it again from this window at any time.
                  """)
         }
-    }
-}
-
-/// The buy / restore row, or the thank-you once it has happened.
-///
-/// Sits at the top of General on purpose: it is the one screenshot App Review
-/// asks for against the in-app purchase, and it is the first thing a free user
-/// wondering about the watermark should find. There is deliberately no menu
-/// bar item -- the watermark is already doing the asking.
-struct PurchaseSection: View {
-    @ObservedObject var store: Store
-
-    var body: some View {
-        Section {
-            if store.isUnlocked {
-                LabeledContent {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.green)
-                        .imageScale(.large)
-                } label: {
-                    Text("RCam is unlocked")
-                    if store.forceLockedActive {
-                        Text("Debug override: forceLocked is set, so the watermark stays on.")
-                    } else {
-                        Text("Thank you for supporting RCam.")
-                    }
-                }
-            } else {
-                LabeledContent {
-                    HStack(spacing: 12) {
-                        Button("Restore Purchases") {
-                            Task { await store.restore() }
-                        }
-                        .buttonStyle(.link)
-                        .font(.caption)
-                        .disabled(busy)
-
-                        switch store.productState {
-                        case .loading:
-                            ProgressView().controlSize(.small)
-                        case .failed:
-                            Button("Retry") {
-                                Task { await store.loadProduct() }
-                            }
-                        case .loaded(let product):
-                            Button("Unlock for \(product.displayPrice)") {
-                                Task { await store.purchase() }
-                            }
-                            .disabled(busy)
-                        }
-                    }
-                } label: {
-                    Text("Free version")
-                    Text(detail)
-                }
-            }
-        } footer: {
-            if !store.isUnlocked {
-                Text("The free version adds a small watermark to the video. A one-time purchase removes it on every Mac signed in to your Apple Account.")
-            }
-        }
-    }
-
-    private var busy: Bool {
-        store.purchaseState == .inProgress
-    }
-
-    /// One line under the title. Purchase problems outrank product-load
-    /// problems: the user just did something and deserves the answer to that.
-    private var detail: String {
-        switch store.purchaseState {
-        case .inProgress:
-            return "Contacting the App Store…"
-        case .pending:
-            return "Purchase pending approval. RCam unlocks when it is approved."
-        case .failed(let message):
-            return message
-        case .idle:
-            break
-        }
-        if case .failed = store.productState {
-            return "Couldn't reach the App Store. Check your connection and retry."
-        }
-        return "Video from RCam carries a watermark."
     }
 }
 

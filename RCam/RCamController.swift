@@ -44,9 +44,6 @@ final class RCamController: ObservableObject {
     @Published private(set) var streamingCameraID: UUID?
 
     let config = ConfigStore()
-    /// Purchase state. Owned here because the frame path below is the one
-    /// place that consumes it per frame; Settings observes it for the UI.
-    let store = Store()
 
     private let log = Logger(subsystem: "com.strawdynamics.rcam", category: "Controller")
     private let sinkWriter = SinkWriter()
@@ -64,8 +61,6 @@ final class RCamController: ObservableObject {
     private var asleep = false
 
     func start() {
-        store.start()
-
         // Without camera authorization the DAL hides camera devices from this
         // process — the poll would never find our own virtual camera.
         AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
@@ -314,11 +309,6 @@ final class RCamController: ObservableObject {
                 self.completeSwitch(from: source)
             }
             if isActive || isPendingNow {
-                // In place, before the sink wraps the buffer: at this point
-                // only the decode thread holds it (see Watermark).
-                if self.store.shouldWatermark {
-                    Watermark.shared.apply(to: pixelBuffer)
-                }
                 self.sinkWriter.enqueue(pixelBuffer)
             }
         }
