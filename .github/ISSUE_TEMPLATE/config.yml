@@ -1,0 +1,7 @@
+# Every report goes through a template, so it arrives with the version and
+# logs a bug always ends up needing. Security reports must not be public.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/strawdynamics/rcam/security/advisories/new
+    about: Please report security issues privately, not as a public issue. See SECURITY.md.
