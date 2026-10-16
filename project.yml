@@ -208,6 +208,7 @@ targets:
       - RCamKit/StreamHealth.swift
       - RCam/CameraPresets.swift
       - RCam/InstallLocation.swift
+      - RCam/ScheduledUpdateGate.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam.tests

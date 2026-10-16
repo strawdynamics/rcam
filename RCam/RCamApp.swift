@@ -6,12 +6,13 @@ struct RCamApp: App {
     @StateObject private var extensionManager = ExtensionManager()
     @StateObject private var controller: RCamController
     @StateObject private var config: ConfigStore
-    @StateObject private var updater = Updater()
+    @StateObject private var updater: Updater
 
     init() {
         let controller = RCamController()
         _controller = StateObject(wrappedValue: controller)
         _config = StateObject(wrappedValue: controller.config)
+        _updater = StateObject(wrappedValue: Updater(cameraInUse: controller.$cameraInUse))
         controller.start()
     }
 

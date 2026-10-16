@@ -22,10 +22,11 @@ import os.log
 /// **Threading contract.** Two disciplines, deliberately:
 ///
 /// - *Main-thread only*: `unwatchedSince`, `backoffSeconds`,
-///   `nextReconnectAllowed`, `asleep`, `statusText`, `streamingCameraID` and
-///   `lastPollDiagnostic`. They are touched by the poll timer, by `select`,
-///   and by the `onStateChange` handler in `makeSource`, all of which run on
-///   main — the handler hops there explicitly before doing anything.
+///   `nextReconnectAllowed`, `asleep`, `statusText`, `streamingCameraID`,
+///   `cameraInUse` and `lastPollDiagnostic`. They are touched by the poll
+///   timer, by `select`, and by the `onStateChange` handler in `makeSource`,
+///   all of which run on main — the handler hops there explicitly before
+///   doing anything.
 /// - *Guarded by `switchLock`*: `activeSource` and `pendingSource`, the only
 ///   two members the decode thread also reaches. Every read and write of them
 ///   takes the lock, including the identity checks in `onFrame`.
@@ -45,6 +46,10 @@ final class RCamController: ObservableObject {
     @Published var statusText = "Starting…"
     /// The camera currently delivering frames to the virtual device, if any.
     @Published private(set) var streamingCameraID: UUID?
+    /// Whether a client has the virtual camera open, as of the last poll: the
+    /// extension's `watched` flag, without the disconnect grace. The updater
+    /// holds scheduled update prompts back while this is true.
+    @Published private(set) var cameraInUse = false
 
     let config = ConfigStore()
 
@@ -190,11 +195,13 @@ final class RCamController: ObservableObject {
     private func poll() {
         guard let device = CMIOHelpers.findDevice(uid: SinkWriter.deviceUID) else {
             statusText = "Virtual camera not installed"
+            if cameraInUse { cameraInUse = false }
             diagnose("device not found; visible UIDs: \(CMIOHelpers.allDeviceUIDs())")
             return
         }
         let watched = CMIOHelpers.readCustomString(device: device, code: "rwch") == "1"
         diagnose("device \(device), watched=\(watched)")
+        if cameraInUse != watched { cameraInUse = watched }
 
         switchLock.lock()
         let hasSource = activeSource != nil || pendingSource != nil
