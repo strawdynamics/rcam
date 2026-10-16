@@ -39,7 +39,7 @@
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://rcam.strawdynamics.com/appcast.xml</string>
+	<string>$(RCAM_SPARKLE_FEED_URL)</string>
 	<key>SUPublicEDKey</key>
 	<string>REPLACE_WITH_SPARKLE_PUBLIC_KEY</string>
 </dict>

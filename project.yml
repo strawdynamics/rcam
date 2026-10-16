@@ -93,6 +93,10 @@ targets:
         # apply one profile to every target, and the app and extension each
         # need their own.
         PROVISIONING_PROFILE_SPECIFIER: $(RCAM_APP_PROFILE_SPECIFIER)
+        # Sparkle's feed, as a setting rather than a literal in Info.plist so
+        # scripts/update-test.sh can point a throwaway build at a local feed
+        # from the xcodebuild command line, without editing this file.
+        RCAM_SPARKLE_FEED_URL: https://rcam.strawdynamics.com/appcast.xml
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
     entitlements:
@@ -139,7 +143,7 @@ targets:
         # through Sparkle's Installer.xpc (see the mach-lookup entitlement).
         # Checks run on Sparkle's schedule with no first-launch permission
         # prompt, but an update is never installed without the user's say-so.
-        SUFeedURL: https://rcam.strawdynamics.com/appcast.xml
+        SUFeedURL: $(RCAM_SPARKLE_FEED_URL)
         SUPublicEDKey: REPLACE_WITH_SPARKLE_PUBLIC_KEY
         SUEnableInstallerLauncherService: true
         SUEnableAutomaticChecks: true
