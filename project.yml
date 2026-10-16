@@ -10,6 +10,11 @@ settings:
     # Configs/Signing.xcconfig (see configFiles below). Setting either here
     # would shadow the xcconfig, and with it a contributor's Local.xcconfig.
     CODE_SIGN_STYLE: Automatic
+    # Notarization requires it on every signed executable. It costs nothing in
+    # the dev loop: the FFmpeg dylibs and Sparkle are re-signed on copy by the
+    # same team, so library validation is satisfied, and the camera entitlement
+    # the sandbox already needed is the same key the runtime checks.
+    ENABLE_HARDENED_RUNTIME: YES
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "1.0.2"
     ARCHS: arm64
@@ -82,6 +87,12 @@ targets:
       groups: [ffmpeg]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam
+        # Empty (and ignored under Automatic signing) except when
+        # scripts/release.sh archives with Manual signing for Developer ID. It
+        # can't be passed on the xcodebuild command line directly: that would
+        # apply one profile to every target, and the app and extension each
+        # need their own.
+        PROVISIONING_PROFILE_SPECIFIER: $(RCAM_APP_PROFILE_SPECIFIER)
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
     entitlements:
@@ -148,6 +159,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam.extension
         # Must equal the bundle ID.
         PRODUCT_NAME: $(PRODUCT_BUNDLE_IDENTIFIER)
+        # See the RCam target's PROVISIONING_PROFILE_SPECIFIER.
+        PROVISIONING_PROFILE_SPECIFIER: $(RCAM_EXTENSION_PROFILE_SPECIFIER)
         # Deliberately NOT the app's epoch stamp. This version only changes when
         # the extension's own inputs change (see scripts/build.sh); re-activating
         # at an unchanged version is a no-op, which is what keeps the running
