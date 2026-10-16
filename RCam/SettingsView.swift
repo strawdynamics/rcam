@@ -8,6 +8,7 @@ struct SettingsView: View {
     @ObservedObject var config: ConfigStore
     let controller: RCamController
     @ObservedObject var extensionManager: ExtensionManager
+    let updater: Updater
 
     var body: some View {
         // The card lives inside each pane rather than wrapped around the
@@ -18,7 +19,7 @@ struct SettingsView: View {
             CamerasPane(config: config, controller: controller)
                 .tabItem { Label("Cameras", systemImage: "video") }
             GeneralPane(config: config, controller: controller,
-                        extensionManager: extensionManager)
+                        extensionManager: extensionManager, updater: updater)
                 .tabItem { Label("General", systemImage: "gearshape") }
         }
         .frame(minWidth: 640, minHeight: 440)
@@ -66,6 +67,7 @@ struct GeneralPane: View {
     @ObservedObject var config: ConfigStore
     let controller: RCamController
     @ObservedObject var extensionManager: ExtensionManager
+    @ObservedObject var updater: Updater
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var showAcknowledgements = false
     @State private var confirmRemoveExtension = false
@@ -103,6 +105,16 @@ struct GeneralPane: View {
                     if !controller.setLaunchAtLogin(newValue) {
                         launchAtLogin = SMAppService.mainApp.status == .enabled
                     }
+                }
+
+                // Bound straight through to Sparkle, which persists the choice
+                // itself. Off still leaves "Check for Updates…" in the menu.
+                Toggle(isOn: Binding(
+                    get: { updater.automaticallyChecksForUpdates },
+                    set: { updater.setAutomaticallyChecksForUpdates($0) }
+                )) {
+                    Text("Automatically check for updates")
+                    Text("RCam always asks before installing an update.")
                 }
 
                 LabeledContent {

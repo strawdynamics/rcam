@@ -6,6 +6,7 @@ struct RCamApp: App {
     @StateObject private var extensionManager = ExtensionManager()
     @StateObject private var controller: RCamController
     @StateObject private var config: ConfigStore
+    @StateObject private var updater = Updater()
 
     init() {
         let controller = RCamController()
@@ -51,6 +52,10 @@ struct RCamApp: App {
                 }
             }
             Divider()
+            Button("Check for Updates…") {
+                updater.checkForUpdates()
+            }
+            .disabled(!updater.canCheckForUpdates)
             SettingsMenuButton()
             Button("Quit RCam") {
                 NSApplication.shared.terminate(nil)
@@ -65,7 +70,7 @@ struct RCamApp: App {
 
         Settings {
             SettingsView(config: config, controller: controller,
-                         extensionManager: extensionManager)
+                         extensionManager: extensionManager, updater: updater)
         }
     }
 }
