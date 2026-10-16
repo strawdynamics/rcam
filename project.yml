@@ -144,7 +144,7 @@ targets:
         # Checks run on Sparkle's schedule with no first-launch permission
         # prompt, but an update is never installed without the user's say-so.
         SUFeedURL: $(RCAM_SPARKLE_FEED_URL)
-        SUPublicEDKey: REPLACE_WITH_SPARKLE_PUBLIC_KEY
+        SUPublicEDKey: vlWYmhVx9CyFwFKP2T6Nl1DkrxE9AWrUtkxPbLP8L18=
         SUEnableInstallerLauncherService: true
         SUEnableAutomaticChecks: true
         SUAutomaticallyUpdate: false

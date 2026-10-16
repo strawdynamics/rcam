@@ -41,6 +41,6 @@
 	<key>SUFeedURL</key>
 	<string>$(RCAM_SPARKLE_FEED_URL)</string>
 	<key>SUPublicEDKey</key>
-	<string>REPLACE_WITH_SPARKLE_PUBLIC_KEY</string>
+	<string>vlWYmhVx9CyFwFKP2T6Nl1DkrxE9AWrUtkxPbLP8L18=</string>
 </dict>
 </plist>
