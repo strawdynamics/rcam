@@ -1,0 +1,77 @@
+# Unsigned build and unit tests for pull requests and main.
+#
+# Everything here runs without an Apple account: CODE_SIGNING_ALLOWED=NO
+# skips team signing (the linker still ad hoc signs arm64 binaries, which is
+# all the test bundle needs to load), and the committed vendor/ffmpeg is used
+# as is. The release workflow is the only place that rebuilds FFmpeg or signs.
+#
+# Untrusted PR code runs here, so this workflow gets a read-only token and no
+# secrets. Never switch it to pull_request_target.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The runner image's default Xcode is 16.4, which can't compile the .icon
+  # app icon bundle (Xcode 26+). Pinned rather than "latest" so an image
+  # update can't change the toolchain under a PR.
+  XCODE_APP: /Applications/Xcode_26.3.app
+  # Matches the local toolchain (xcodegen --version). The checksum is the
+  # release asset digest GitHub publishes for xcodegen.zip.
+  XCODEGEN_VERSION: 2.46.0
+  XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
+
+      - name: Generate the Xcode project
+        run: |
+          xcodegen --version
+          xcodegen generate
+
+      - name: Preflight
+        run: scripts/preflight.sh
+
+      - name: Build RCam
+        run: |
+          xcodebuild build -project RCam.xcodeproj -scheme RCam -derivedDataPath build \
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Build rcamcli
+        run: |
+          xcodebuild build -project RCam.xcodeproj -scheme rcamcli -derivedDataPath build \
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Test
+        run: |
+          xcodebuild test -project RCam.xcodeproj -scheme RCam -derivedDataPath build \
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
