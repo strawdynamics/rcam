@@ -12,10 +12,37 @@
 #                                        system-extension.install and the app group
 #                                        are profile-gated, so neither bundle can be
 #                                        signed for Developer ID without one.
+#   NOTARY_PROFILE                       notarytool keychain profile (from
+#                                        `xcrun notarytool store-credentials`).
+#                                        Used locally.
+#   ASC_API_KEY_PATH, ASC_API_KEY_ID,    App Store Connect API key (.p8 path, key
+#   ASC_API_ISSUER_ID                    ID, issuer ID) for notarytool. Used in CI;
+#                                        takes precedence over NOTARY_PROFILE.
+#   SPARKLE_ED_PRIVATE_KEY               The Sparkle EdDSA private key (CI). When
+#                                        unset, sign_update reads the key from the
+#                                        login keychain under SPARKLE_KEY_ACCOUNT.
+#   SPARKLE_KEY_ACCOUNT                  Keychain account of that key. Defaults to
+#                                        the app's bundle ID, which is what the
+#                                        key was generated under
+#                                        (generate_keys --account <bundle ID>).
 #
-# --unsigned archives with CODE_SIGNING_ALLOWED=NO and skips export and every
-# signing check, so the script can be smoke-tested with no certificate, profile
-# or Apple account. Its output is not runnable as a system extension host.
+# Artifacts, all in build/release/:
+#   RCam-<version>.dmg            notarized and stapled, app + /Applications link
+#   RCam-<version>-dSYMs.zip      ours plus the FFmpeg dylibs'
+#   notes.md                      this version's CHANGELOG.md section
+#   appcast-item.xml              one Sparkle <item>; scripts/appcast-merge.sh
+#                                 prepends it to the live appcast
+#   SHA256SUMS                    for the DMG and the dSYMs zip
+#
+# sign_update is the copy in the Sparkle SPM artifact xcodebuild resolves into
+# build/release/dd/SourcePackages for this very archive, so the signing tool is
+# always the same Sparkle version the app links -- no separate download.
+#
+# --unsigned archives with CODE_SIGNING_ALLOWED=NO and skips export, signing,
+# notarization and Sparkle signing, but still produces the DMG and every other
+# artifact, so the script can be smoke-tested with no certificate, profile or
+# Apple account. Its output is not runnable as a system extension host, and its
+# appcast item has no sparkle:edSignature, so no Sparkle client would accept it.
 #
 # Signing needs a "Developer ID Application" identity in a keychain on the
 # search list. The archive is signed with it directly (Manual style) rather
@@ -186,6 +213,42 @@ if [[ "$SIGNED" == yes ]]; then
   APP_PROFILE_UUID="$(install_profile RCAM_APP_PROVISIONING_PROFILE "$APP_ID")"
   EXTENSION_PROFILE_UUID="$(install_profile RCAM_EXTENSION_PROVISIONING_PROFILE "$EXTENSION_ID")"
   echo "Profiles: app $APP_PROFILE_UUID, extension $EXTENSION_PROFILE_UUID"
+
+  # Everything the post-archive steps need is checked now, not after a
+  # ten-minute archive and notarization round trip.
+
+  # The DMG is signed with codesign directly (export only signs the app), so
+  # pin the exact certificate: a bare "Developer ID Application" is ambiguous
+  # in a keychain holding more than one team's.
+  DMG_IDENTITY="$(security find-identity -v -p codesigning \
+    | awk -v team="($TEAM_ID)\"" '/"Developer ID Application: / && index($0, team) { print $2; exit }')"
+  if [[ -z "$DMG_IDENTITY" ]]; then
+    echo "error: no valid \"Developer ID Application: … ($TEAM_ID)\" identity in the keychain" >&2
+    echo "       search list (security find-identity -v -p codesigning)." >&2
+    exit 1
+  fi
+
+  if [[ -n "${ASC_API_KEY_PATH:-}" ]]; then
+    if [[ ! -f "$ASC_API_KEY_PATH" || -z "${ASC_API_KEY_ID:-}" || -z "${ASC_API_ISSUER_ID:-}" ]]; then
+      echo "error: ASC_API_KEY_PATH needs an existing .p8 file plus ASC_API_KEY_ID and" >&2
+      echo "       ASC_API_ISSUER_ID (got path '$ASC_API_KEY_PATH')." >&2
+      exit 1
+    fi
+    NOTARY_AUTH=(--key "$ASC_API_KEY_PATH" --key-id "$ASC_API_KEY_ID" --issuer "$ASC_API_ISSUER_ID")
+  elif [[ -n "${NOTARY_PROFILE:-}" ]]; then
+    NOTARY_AUTH=(--keychain-profile "$NOTARY_PROFILE")
+  else
+    echo "error: no notarization credentials. Set NOTARY_PROFILE to a profile saved with" >&2
+    echo "       \`xcrun notarytool store-credentials\`, or ASC_API_KEY_PATH, ASC_API_KEY_ID" >&2
+    echo "       and ASC_API_ISSUER_ID (or pass --unsigned)." >&2
+    exit 1
+  fi
+
+  if [[ -n "${SPARKLE_ED_PRIVATE_KEY:-}" ]]; then
+    SPARKLE_KEY_ARGS=(--ed-key-file -)
+  else
+    SPARKLE_KEY_ARGS=(--account "${SPARKLE_KEY_ACCOUNT:-$APP_ID}")
+  fi
   # The two *_PROFILE_SPECIFIER settings feed each target's
   # PROVISIONING_PROFILE_SPECIFIER in project.yml; the rest apply everywhere,
   # which is fine because only those two targets take a profile.
@@ -200,7 +263,10 @@ else
   ARCHIVE_SIGNING=(CODE_SIGNING_ALLOWED=NO)
 fi
 
-rm -rf "$ARCHIVE" "$EXPORT"
+# Clear every artifact a previous run left, so nothing stale can be uploaded
+# alongside this run's output.
+rm -rf "$ARCHIVE" "$EXPORT" "$OUT/dmg" "$OUT/notarize" \
+  "$OUT"/RCam-*.dmg "$OUT"/RCam-*-dSYMs.zip "$OUT/appcast-item.xml" "$OUT/SHA256SUMS"
 xcodebuild archive \
   -project RCam.xcodeproj -scheme RCam -configuration Release \
   -archivePath "$ARCHIVE" -derivedDataPath "$OUT/dd" \
@@ -244,13 +310,43 @@ for dylib in "$APP/Contents/Frameworks"/*.dylib; do
 done
 echo "Bundled dSYMs: $(cd "$ARCHIVE/dSYMs" && ls -d *.dSYM | tr '\n' ' ')"
 
-if [[ "$SIGNED" == no ]]; then
-  echo
-  echo "Unsigned archive at $ARCHIVE (export and signing checks skipped)."
-  exit 0
-fi
+# notarytool exits 0 for some rejected submissions, so trust only the status
+# it reports, and print Apple's log on failure: it names the offending binary.
+notarize() {
+  local file="$1" result id status
+  echo "Notarizing $(basename "$file")…"
+  result="$(xcrun notarytool submit "$file" "${NOTARY_AUTH[@]}" --wait --output-format json)" || true
+  id="$(plutil -extract id raw -o - - <<< "$result" 2>/dev/null || true)"
+  status="$(plutil -extract status raw -o - - <<< "$result" 2>/dev/null || true)"
+  if [[ "$status" != Accepted ]]; then
+    echo "error: notarization of $file ended with status '${status:-unknown}':" >&2
+    echo "$result" >&2
+    if [[ -n "$id" ]]; then
+      xcrun notarytool log "$id" "${NOTARY_AUTH[@]}" >&2 || true
+    fi
+    return 1
+  fi
+  echo "Notarized $(basename "$file") (submission $id)"
+}
 
-cat > "$OUT/ExportOptions.plist" <<PLIST
+SIGN_UPDATE="$OUT/dd/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
+if [[ "$SIGNED" == yes ]]; then
+  if [[ ! -x "$SIGN_UPDATE" ]]; then
+    echo "error: $SIGN_UPDATE not found. The Sparkle SPM artifact layout may have" >&2
+    echo "       changed; look under $OUT/dd/SourcePackages/artifacts." >&2
+    exit 1
+  fi
+  # A release shipped with the placeholder (or no) key can never be updated:
+  # Sparkle refuses to start without a valid SUPublicEDKey.
+  ed_key="$(/usr/libexec/PlistBuddy -c 'Print SUPublicEDKey' "$APP/Contents/Info.plist" 2>/dev/null || true)"
+  if [[ ! "$ed_key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+    echo "error: SUPublicEDKey in the built Info.plist is '$ed_key', not a Sparkle" >&2
+    echo "       EdDSA public key. Set it in project.yml before releasing." >&2
+    exit 1
+  fi
+
+  # The XML declaration must be the first byte of the file, hence column 0.
+  cat > "$OUT/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -269,42 +365,181 @@ cat > "$OUT/ExportOptions.plist" <<PLIST
 </plist>
 PLIST
 
-xcodebuild -exportArchive \
-  -archivePath "$ARCHIVE" -exportPath "$EXPORT" \
-  -exportOptionsPlist "$OUT/ExportOptions.plist"
+  xcodebuild -exportArchive \
+    -archivePath "$ARCHIVE" -exportPath "$EXPORT" \
+    -exportOptionsPlist "$OUT/ExportOptions.plist"
 
-APP="$EXPORT/RCam.app"
-EXT="$APP/Contents/Library/SystemExtensions/$EXTENSION_ID.systemextension"
-[[ -d "$APP" ]] || { echo "error: expected $APP after export" >&2; exit 1; }
+  APP="$EXPORT/RCam.app"
+  EXT="$APP/Contents/Library/SystemExtensions/$EXTENSION_ID.systemextension"
+  [[ -d "$APP" ]] || { echo "error: expected $APP after export" >&2; exit 1; }
 
-codesign --verify --deep --strict --verbose=2 "$APP"
+  codesign --verify --deep --strict --verbose=2 "$APP"
 
-# Notarization rejects any executable without the hardened runtime, and says so
-# only after a round trip to Apple. Check every one we ship: the app, the
-# extension, Sparkle's helpers (re-signed at export) and the FFmpeg dylibs.
-SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
-for code in \
-  "$APP" \
-  "$EXT" \
-  "$SPARKLE/Autoupdate" \
-  "$SPARKLE/Updater.app" \
-  "$SPARKLE/XPCServices/Installer.xpc" \
-  "$SPARKLE/XPCServices/Downloader.xpc" \
-  "$APP/Contents/Frameworks"/libav*.dylib
-do
-  if [[ ! -e "$code" ]]; then
-    echo "error: expected $code in the exported app" >&2
+  # Notarization rejects any executable without the hardened runtime, and says
+  # so only after a round trip to Apple. Check every one we ship: the app, the
+  # extension, Sparkle's helpers (re-signed at export) and the FFmpeg dylibs.
+  SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+  for code in \
+    "$APP" \
+    "$EXT" \
+    "$SPARKLE/Autoupdate" \
+    "$SPARKLE/Updater.app" \
+    "$SPARKLE/XPCServices/Installer.xpc" \
+    "$SPARKLE/XPCServices/Downloader.xpc" \
+    "$APP/Contents/Frameworks"/libav*.dylib
+  do
+    if [[ ! -e "$code" ]]; then
+      echo "error: expected $code in the exported app" >&2
+      exit 1
+    fi
+    details="$(codesign -d --verbose=2 "$code" 2>&1)"
+    if ! grep -q '^CodeDirectory .*flags=.*(runtime)' <<< "$details"; then
+      echo "error: ${code#"$APP"/} is not signed with the hardened runtime:" >&2
+      grep '^CodeDirectory' <<< "$details" >&2 || true
+      exit 1
+    fi
+    if ! grep -q "^TeamIdentifier=$TEAM_ID\$" <<< "$details"; then
+      echo "error: ${code#"$APP"/} is not signed by team $TEAM_ID" >&2
+      exit 1
+    fi
+  done
+  echo "Signed with Developer ID and the hardened runtime: $APP"
+
+  # Notarize and staple the app itself, not just the DMG: the ticket then
+  # travels with RCam.app once it's dragged out of the image, so Gatekeeper
+  # can check it offline. notarytool takes a zip, not a bare bundle.
+  mkdir -p "$OUT/notarize"
+  ditto -c -k --keepParent "$APP" "$OUT/notarize/RCam.zip"
+  notarize "$OUT/notarize/RCam.zip"
+  xcrun stapler staple "$APP"
+  xcrun stapler validate "$APP"
+fi
+
+# A plain hdiutil image: the app plus a link to /Applications to drag it onto.
+# No background art or .DS_Store layout, which would need Finder scripting
+# that CI runners can't do headlessly. The app is copied in after stapling.
+DMG="$OUT/RCam-$MARKETING.dmg"
+mkdir -p "$OUT/dmg"
+ditto "$APP" "$OUT/dmg/RCam.app"
+ln -s /Applications "$OUT/dmg/Applications"
+hdiutil create -volname RCam -srcfolder "$OUT/dmg" -fs HFS+ -format UDZO -ov "$DMG"
+
+if [[ "$SIGNED" == yes ]]; then
+  # The DMG gets its own signature and ticket so the first thing Gatekeeper
+  # sees on download already checks out. Stapling rewrites the file, so the
+  # Sparkle signature has to come after it.
+  codesign --sign "$DMG_IDENTITY" --timestamp "$DMG"
+  codesign --verify --strict --verbose=2 "$DMG"
+  notarize "$DMG"
+  xcrun stapler staple "$DMG"
+  xcrun stapler validate "$DMG"
+
+  ed_signature="$(
+    if [[ -n "${SPARKLE_ED_PRIVATE_KEY:-}" ]]; then
+      printf '%s\n' "$SPARKLE_ED_PRIVATE_KEY"
+    fi | "$SIGN_UPDATE" "${SPARKLE_KEY_ARGS[@]}" -p "$DMG"
+  )"
+  if [[ -z "$ed_signature" ]]; then
+    echo "error: sign_update produced no EdDSA signature for $DMG" >&2
     exit 1
   fi
-  details="$(codesign -d --verbose=2 "$code" 2>&1)"
-  if ! grep -q '^CodeDirectory .*flags=.*(runtime)' <<< "$details"; then
-    echo "error: ${code#"$APP"/} is not signed with the hardened runtime:" >&2
-    grep '^CodeDirectory' <<< "$details" >&2 || true
-    exit 1
-  fi
-  if ! grep -q "^TeamIdentifier=$TEAM_ID\$" <<< "$details"; then
-    echo "error: ${code#"$APP"/} is not signed by team $TEAM_ID" >&2
-    exit 1
-  fi
+fi
+
+# The appcast description is notes.md as HTML; Sparkle renders it in the update
+# prompt. Only the Markdown CHANGELOG.md actually uses is handled -- headings,
+# "-"/"*" bullets (indented lines continue the bullet), paragraphs, `code`,
+# **bold**, *italics* and [links](url) -- in macOS's stock perl, so neither a
+# runner nor a contributor needs a Markdown package. Text is escaped before
+# markup is added, which also guarantees no "]]>" can end the CDATA early.
+render_notes_html() {
+  perl -e '
+    use strict; use warnings;
+    sub esc { my $s = shift; $s =~ s/&/&amp;/g; $s =~ s/</&lt;/g; $s =~ s/>/&gt;/g; $s }
+    sub inline {
+      my @parts = split /`/, shift, -1;
+      for my $i (0 .. $#parts) {
+        if ($i % 2) { $parts[$i] = "<code>" . esc($parts[$i]) . "</code>"; next }
+        my $t = esc($parts[$i]);
+        $t =~ s{\[([^\]]+)\]\(([^)\s]+)\)}{<a href="$2">$1</a>}g;
+        $t =~ s{\*\*(.+?)\*\*}{<strong>$1</strong>}g;
+        $t =~ s{(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])}{<em>$1</em>}g;
+        $parts[$i] = $t;
+      }
+      join "", @parts;
+    }
+    my (@out, @para, @items, $in_list);
+    sub flush {
+      push @out, "<p>" . inline(join " ", @para) . "</p>" if @para;
+      push @out, "<ul>\n" . join("", map { "<li>" . inline($_) . "</li>\n" } @items) . "</ul>" if @items;
+      @para = (); @items = (); $in_list = 0;
+    }
+    while (my $line = <>) {
+      chomp $line;
+      if ($line =~ /^\s*$/) { flush(); next }
+      if ($line =~ /^(#{1,6})\s+(.*?)\s*$/) {
+        flush(); my $n = length $1; push @out, "<h$n>" . inline($2) . "</h$n>"; next;
+      }
+      if ($line =~ /^[-*]\s+(.*)$/) {
+        push @out, "<p>" . inline(join " ", @para) . "</p>" if @para; @para = ();
+        push @items, $1; $in_list = 1; next;
+      }
+      if ($in_list && $line =~ /^\s+(\S.*)$/) { $items[-1] .= " $1"; next }
+      flush() if $in_list;
+      (my $text = $line) =~ s/^\s+//;
+      push @para, $text;
+    }
+    flush();
+    print join("\n", @out), "\n";
+  ' "$1"
+}
+
+# One <item> for this release. It isn't a standalone XML document (the
+# sparkle: prefix is declared on the feed's <rss>); scripts/appcast-merge.sh
+# prepends it to the live appcast.xml and validates the result.
+#
+# sparkle:version is CFBundleVersion, the epoch stamp: it's what Sparkle
+# compares. The minimum system version comes from the built bundle so it can't
+# drift from the deployment target.
+min_os="$(/usr/libexec/PlistBuddy -c 'Print LSMinimumSystemVersion' "$APP/Contents/Info.plist")"
+dmg_length="$(stat -f %z "$DMG")"
+dmg_url="https://github.com/strawdynamics/rcam/releases/download/v$MARKETING/$(basename "$DMG")"
+if [[ "$SIGNED" == yes ]]; then
+  signature_attr=" sparkle:edSignature=\"$ed_signature\""
+  unsigned_note=""
+else
+  signature_attr=""
+  unsigned_note=$'\n      <!-- Unsigned smoke-test build: no sparkle:edSignature, so Sparkle would reject this item. -->'
+fi
+{
+  cat <<ITEM
+    <item>
+      <title>Version $MARKETING</title>
+      <pubDate>$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')</pubDate>
+      <sparkle:version>$app_v</sparkle:version>
+      <sparkle:shortVersionString>$MARKETING</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>$min_os</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+ITEM
+  render_notes_html "$OUT/notes.md"
+  cat <<ITEM
+      ]]></description>$unsigned_note
+      <enclosure url="$dmg_url" length="$dmg_length" type="application/octet-stream"$signature_attr/>
+    </item>
+ITEM
+} > "$OUT/appcast-item.xml"
+
+DSYMS_ZIP="$OUT/RCam-$MARKETING-dSYMs.zip"
+ditto -c -k --keepParent "$ARCHIVE/dSYMs" "$DSYMS_ZIP"
+
+(cd "$OUT" && shasum -a 256 "$(basename "$DMG")" "$(basename "$DSYMS_ZIP")" > SHA256SUMS)
+
+echo
+if [[ "$SIGNED" == yes ]]; then
+  echo "Release $MARKETING ($app_v) is notarized, stapled and Sparkle-signed."
+else
+  echo "Unsigned release $MARKETING ($app_v): signing, notarization and Sparkle skipped."
+fi
+echo "Artifacts in $OUT:"
+for f in "$(basename "$DMG")" "$(basename "$DSYMS_ZIP")" notes.md appcast-item.xml SHA256SUMS; do
+  echo "  $f"
 done
-echo "Signed with Developer ID and the hardened runtime: $APP"
