@@ -139,7 +139,12 @@ jobs:
 
           curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" "$DEVELOPER_ID_CA_URL"
           echo "$DEVELOPER_ID_CA_SHA256  $RUNNER_TEMP/DeveloperIDG2CA.cer" | shasum -a 256 -c -
-          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain"
+          # A .p12 exported with its chain already holds this intermediate, and
+          # importing it again fails with "already exists"; that one is fine.
+          if ! out="$(security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain" 2>&1)"; then
+            grep -q "already exists" <<<"$out" || { echo "$out" >&2; exit 1; }
+            echo "Developer ID G2 intermediate already in the keychain (from the .p12)."
+          fi
 
           # Without this, the first codesign blocks on a UI prompt nobody can
           # answer and the job hangs until it times out.
