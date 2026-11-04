@@ -33,7 +33,7 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
         switch state {
         case .unknown: return "Not installed"
         case .activating: return "Installing…"
-        case .needsApproval: return "Needs approval in System Settings › Privacy & Security"
+        case .needsApproval: return "Needs approval in System Settings › General › Login Items & Extensions"
         case .activated: return "Activated"
         case .activatedAfterReboot: return "Will activate after restart"
         case .removing: return "Removing…"
@@ -145,7 +145,7 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
 
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
         // Fires for removal too, where the wording above would be wrong: there
-        // is nothing to approve under Privacy & Security for a deactivation.
+        // is nothing to approve under Login Items & Extensions for a deactivation.
         switch pendingKinds[ObjectIdentifier(request)] ?? .activate {
         case .activate:
             state = .needsApproval
