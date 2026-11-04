@@ -22,9 +22,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The runner image's default Xcode is 16.4, which can't compile the .icon
-  # app icon bundle (Xcode 26+). Pinned rather than "latest" so an image
-  # update can't change the toolchain under a PR.
+  # The .icon app icon bundle needs Xcode 26+, and Xcode 26's actool crashes
+  # compiling it on a macOS 15 host (its asset runtime's CoreMedia overrides
+  # don't match the host OS), so the jobs run on macos-26. Pinned rather than
+  # "latest" so an image update can't change the toolchain under a PR.
   XCODE_APP: /Applications/Xcode_26.3.app
   # Matches the local toolchain (xcodegen --version). The checksum is the
   # release asset digest GitHub publishes for xcodegen.zip.
@@ -33,7 +34,7 @@ env:
 
 jobs:
   build-and-test:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

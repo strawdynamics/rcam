@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Same toolchain pins as ci.yml; see the comments there.
+  # Same toolchain pins and runner image as ci.yml; see the comments there.
   XCODE_APP: /Applications/Xcode_26.3.app
   XCODEGEN_VERSION: 2.46.0
   XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
@@ -40,7 +40,7 @@ env:
 
 jobs:
   release:
-    runs-on: macos-15
+    runs-on: macos-26
     environment: release
     timeout-minutes: 120
     permissions:
