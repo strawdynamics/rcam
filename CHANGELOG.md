@@ -6,7 +6,7 @@ All notable changes to RCam are documented here. The format is based on
 
 ## [Unreleased]
 
-## [1.0.2] - 2026-XX-XX
+## [1.0.2] - 2026-11-04
 
 The first public release. RCam is now free and open source under the MIT
 License.
