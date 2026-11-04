@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest something RCam should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The problem or situation, rather than a particular solution. "My camera only offers MJPEG over HTTP" is more useful than "add an HTTP source".
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help?
+      description: How you'd like RCam to handle it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and workarounds
+      description: Anything you've tried, or other apps that handle this well.
+  - type: input
+    id: camera
+    attributes:
+      label: Camera brand and model
+      description: If this is about a specific camera.

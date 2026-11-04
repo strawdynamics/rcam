@@ -17,6 +17,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 FFMPEG_VERSION="7.1.1"
+# SHA-256 of ffmpeg-$FFMPEG_VERSION.tar.xz. These dylibs ship inside a signed,
+# notarized app, so the tarball is part of the supply chain: pin it rather than
+# trusting whatever ffmpeg.org (or anything between here and it) serves today.
+# Taken from the tarball whose ffmpeg-7.1.1.tar.xz.asc verified against the
+# FFmpeg release signing key (FCF9 86EA 15E6 E293 A564 4F10 B432 2F04 D676 58D8,
+# https://ffmpeg.org/ffmpeg-devel.asc). Bumping FFMPEG_VERSION means repeating
+# that check, not just copying the new tarball's hash.
+FFMPEG_SHA256="733984395e0dbbe5c046abda2dc49a5544e7e0e1e2366bba849222ae9e3a03b1"
 
 # Must match project.yml's deploymentTarget. ./configure otherwise inherits the
 # *build machine's* SDK version as the minimum, which stamps the static libs
@@ -29,9 +37,31 @@ SRC_DIR="$PREFIX/src"
 TARBALL="$SRC_DIR/ffmpeg-$FFMPEG_VERSION.tar.xz"
 TREE="$SRC_DIR/ffmpeg-$FFMPEG_VERSION"
 
+# verify_tarball <file> <description>
+verify_tarball() {
+  local actual
+  actual="$(shasum -a 256 "$1" | awk '{print $1}')"
+  if [[ "$actual" != "$FFMPEG_SHA256" ]]; then
+    echo "error: $1 ($2) has SHA-256" >&2
+    echo "       $actual" >&2
+    echo "       expected $FFMPEG_SHA256" >&2
+    echo "       Not building from it. Delete it (and $TREE) to re-download, and if" >&2
+    echo "       the fresh download mismatches too, find out why before changing the pin." >&2
+    exit 1
+  fi
+}
+
 mkdir -p "$SRC_DIR"
 if [[ ! -f "$TARBALL" ]]; then
-  curl -fL --retry 3 -o "$TARBALL" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
+  # Download to a temp name so an interrupted or rejected download never
+  # becomes the "cached" tarball the next run trusts.
+  curl -fL --retry 3 -o "$TARBALL.part" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
+  verify_tarball "$TARBALL.part" "fresh download"
+  mv -f "$TARBALL.part" "$TARBALL"
+else
+  # A cached tarball is checked too: it may predate the pin, or be a CI cache
+  # restored from somewhere this run did not produce.
+  verify_tarball "$TARBALL" "cached"
 fi
 if [[ ! -d "$TREE" ]]; then
   tar -xf "$TARBALL" -C "$SRC_DIR"
@@ -56,8 +86,8 @@ rm -rf "$PREFIX/lib" "$PREFIX/include"
   `# FFmpeg strips with "strip -x" on install, which drops the debug map (the` \
   `# N_OSO/N_SO stabs pointing at the .o files) along with the local symbols.` \
   `# dsymutil reads exactly that map, so a stripped-on-install dylib yields a` \
-  `# dSYM with the right UUID and no symbols in it -- and App Store Connect` \
-  `# rejects the symbol upload for every one of them. Keep the map, generate` \
+  `# dSYM with the right UUID and no symbols in it, which symbolicates` \
+  `# nothing. Keep the map, generate` \
   `# the dSYMs below, and strip afterwards, which is the order Xcode uses.` \
   --disable-stripping \
   --disable-everything \
@@ -102,10 +132,8 @@ for lib in avformat avcodec avutil; do
   ln -sf "$soname" "$PREFIX/lib/lib$lib.dylib"
 done
 
-# Symbols. App Store Connect asks for a DWARF file for every Mach-O in the
-# upload and warns loudly per library when one is missing, so these are not
-# optional extras -- and a beta whose crash reports stop at the FFmpeg frontier
-# is a beta that cannot diagnose its own decode path.
+# Symbols. These are not optional extras: a release whose crash reports stop
+# at the FFmpeg frontier is a release that cannot diagnose its own decode path.
 #
 # Order matters: dsymutil pulls the DWARF out of the .o files via the debug map
 # in each dylib, so it has to run before the strip that removes that map. The

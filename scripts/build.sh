@@ -67,8 +67,10 @@ else
   # No state yet, but a previously-installed extension may carry a much larger
   # version (this scheme replaced an epoch stamp). Seed above it: macOS refuses
   # to activate a lower version than the one already installed.
-  INSTALLED_EXTENSION_PLIST=/Applications/RCam.app/Contents/Library/SystemExtensions/com.strawdynamics.rcam.extension.systemextension/Contents/Info.plist
-  if [[ -f "$INSTALLED_EXTENSION_PLIST" ]]; then
+  # Globbed rather than named: the installed copy may have been built under a
+  # different RCAM_BUNDLE_ID_PREFIX, and the bundle only ever holds one.
+  INSTALLED_EXTENSION_PLIST="$(compgen -G '/Applications/RCam.app/Contents/Library/SystemExtensions/*.systemextension/Contents/Info.plist' | head -n1 || true)"
+  if [[ -n "$INSTALLED_EXTENSION_PLIST" ]]; then
     PREVIOUS_VERSION="$(defaults read "${INSTALLED_EXTENSION_PLIST%.plist}" CFBundleVersion 2>/dev/null || echo 0)"
     [[ "$PREVIOUS_VERSION" =~ ^[0-9]+$ ]] || PREVIOUS_VERSION=0
   fi
@@ -90,6 +92,21 @@ printf '%s %s\n' "$EXTENSION_INPUT_HASH" "$EXTENSION_VERSION" > "$EXTENSION_STAT
 
 xcodegen generate
 
+# The team and extension bundle ID come from Configs/Signing.xcconfig (or a
+# contributor's Local.xcconfig), so ask Xcode for them rather than repeat them.
+EXTENSION_SETTINGS="$(xcodebuild -project RCam.xcodeproj -target RCamExtension \
+  -configuration "$CONFIGURATION" -showBuildSettings 2>/dev/null)"
+extension_setting() {
+  awk -v key="$1" '$1 == key && $2 == "=" { print $3; exit }' <<< "$EXTENSION_SETTINGS"
+}
+TEAM_ID="$(extension_setting DEVELOPMENT_TEAM)"
+EXTENSION_ID="$(extension_setting PRODUCT_BUNDLE_IDENTIFIER)"
+if [[ -z "$TEAM_ID" || -z "$EXTENSION_ID" ]]; then
+  echo "error: could not read DEVELOPMENT_TEAM / PRODUCT_BUNDLE_IDENTIFIER for RCamExtension" >&2
+  echo "       from xcodebuild -showBuildSettings. Check Configs/Signing.xcconfig." >&2
+  exit 1
+fi
+
 xcodebuild -project RCam.xcodeproj -scheme RCam -configuration "$CONFIGURATION" \
   -derivedDataPath build -allowProvisioningUpdates build
 
@@ -104,7 +121,7 @@ fi
 
 if [[ "$EXTENSION_CHANGED" == yes ]]; then
   systemextensionsctl uninstall \
-    TK7EDP5B95 com.strawdynamics.rcam.extension \
+    "$TEAM_ID" "$EXTENSION_ID" \
     2>/dev/null || true
 fi
 

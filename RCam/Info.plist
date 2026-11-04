@@ -29,8 +29,18 @@
 	<key>NSCameraUsageDescription</key>
 	<string>RCam pushes video into its own virtual camera device.</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright (c) 2026 Straw Dynamics. All rights reserved.</string>
+	<string>Copyright © 2026 Straw Dynamics. MIT License.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>RCam connects to RTSP cameras on your local network.</string>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>$(RCAM_SPARKLE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>vlWYmhVx9CyFwFKP2T6Nl1DkrxE9AWrUtkxPbLP8L18=</string>
 </dict>
 </plist>

@@ -10,7 +10,9 @@ import os.log
 /// remembers, keyed by the request. Without it a deactivation that finishes
 /// would report itself as "Activated".
 final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionRequestDelegate {
-    static let extensionIdentifier = "com.strawdynamics.rcam.extension"
+    /// project.yml names the extension `<app bundle ID>.extension`, so derive
+    /// it rather than repeat the prefix a contributor's Local.xcconfig changes.
+    static let extensionIdentifier = Bundle.main.bundleIdentifier! + ".extension"
 
     enum State: Equatable {
         case unknown
@@ -31,7 +33,7 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
         switch state {
         case .unknown: return "Not installed"
         case .activating: return "Installing…"
-        case .needsApproval: return "Needs approval in System Settings › Privacy & Security"
+        case .needsApproval: return "Needs approval in System Settings › General › Login Items & Extensions"
         case .activated: return "Activated"
         case .activatedAfterReboot: return "Will activate after restart"
         case .removing: return "Removing…"
@@ -72,7 +74,15 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
         super.init()
         // Activate on every launch: no-op when already current, triggers the
         // .replace path when the installed extension version is older.
+        // Checked first because activating from a DMG, ~/Downloads or a
+        // translocated mount can only fail, and the failure sysextd reports
+        // tells the user nothing about the drag they need to do.
         DispatchQueue.main.async { [weak self] in
+            let location = InstallLocation.classify(bundleURL: Bundle.main.bundleURL)
+            guard location == .ok else {
+                InstallLocationAlert.presentAndQuit(location)
+                return
+            }
             self?.activate()
         }
     }
@@ -135,7 +145,7 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
 
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
         // Fires for removal too, where the wording above would be wrong: there
-        // is nothing to approve under Privacy & Security for a deactivation.
+        // is nothing to approve under Login Items & Extensions for a deactivation.
         switch pendingKinds[ObjectIdentifier(request)] ?? .activate {
         case .activate:
             state = .needsApproval
@@ -174,6 +184,15 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
            (error as? OSSystemExtensionError)?.code == .extensionNotFound {
             state = .removed
             log.info("Deactivation: extension was not installed")
+            return
+        }
+        // The path check at launch is a prediction; this is sysextd's verdict.
+        // Same remedy, so the same window rather than a "Failed:" status.
+        if kind == .activate,
+           (error as? OSSystemExtensionError)?.code == .unsupportedParentBundleLocation {
+            state = .failed(error.localizedDescription)
+            log.error("Activation refused: unsupported parent bundle location")
+            InstallLocationAlert.presentAndQuit(.notInApplications)
             return
         }
         state = .failed(error.localizedDescription)

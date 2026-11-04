@@ -1,16 +1,22 @@
 name: RCam
 options:
-  bundleIdPrefix: com.strawdynamics
   deploymentTarget:
     macOS: "15.0"
   createIntermediateGroups: true
 
 settings:
   base:
-    DEVELOPMENT_TEAM: TK7EDP5B95
+    # DEVELOPMENT_TEAM and RCAM_BUNDLE_ID_PREFIX come from
+    # Configs/Signing.xcconfig (see configFiles below). Setting either here
+    # would shadow the xcconfig, and with it a contributor's Local.xcconfig.
     CODE_SIGN_STYLE: Automatic
+    # Notarization requires it on every signed executable. It costs nothing in
+    # the dev loop: the FFmpeg dylibs and Sparkle are re-signed on copy by the
+    # same team, so library validation is satisfied, and the camera entitlement
+    # the sandbox already needed is the same key the runtime checks.
+    ENABLE_HARDENED_RUNTIME: YES
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "1.0.1"
+    MARKETING_VERSION: "1.0.2"
     ARCHS: arm64
 
 settingGroups:
@@ -25,9 +31,20 @@ settingGroups:
     # them at runtime -- the app in its bundle, rcamcli in the vendor dir.
     OTHER_LDFLAGS: "-lavformat -lavcodec -lavutil"
 
+# Signing.xcconfig is committed and pulls in the generated Version.xcconfig and
+# the optional, gitignored Local.xcconfig.
 configFiles:
-  Debug: Configs/Version.xcconfig
-  Release: Configs/Version.xcconfig
+  Debug: Configs/Signing.xcconfig
+  Release: Configs/Signing.xcconfig
+
+packages:
+  # Pinned exactly: the sandboxing setup below (entitlements, Info.plist keys)
+  # follows this version's docs, and the EdDSA key was generated with its
+  # generate_keys. Re-read sparkle-project.org/documentation/sandboxing before
+  # bumping.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 
 targets:
   RCam:
@@ -69,7 +86,17 @@ targets:
     settings:
       groups: [ffmpeg]
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam
+        PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam
+        # Empty (and ignored under Automatic signing) except when
+        # scripts/release.sh archives with Manual signing for Developer ID. It
+        # can't be passed on the xcodebuild command line directly: that would
+        # apply one profile to every target, and the app and extension each
+        # need their own.
+        PROVISIONING_PROFILE_SPECIFIER: $(RCAM_APP_PROFILE_SPECIFIER)
+        # Sparkle's feed, as a setting rather than a literal in Info.plist so
+        # scripts/update-test.sh can point a throwaway build at a local feed
+        # from the xcodebuild command line, without editing this file.
+        RCAM_SPARKLE_FEED_URL: https://rcam.strawdynamics.com/appcast.xml
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
     entitlements:
@@ -80,6 +107,13 @@ targets:
         com.apple.developer.system-extension.install: true
         # Sandboxed access to CMIO devices (needed to write the sink stream).
         com.apple.security.device.camera: true
+        # Sparkle's sandboxed installer: the app talks to its Installer.xpc
+        # launcher over these two mach services. Sparkle's Downloader.xpc is
+        # deliberately not enabled -- its docs say to use it only when the app
+        # lacks network.client, which RCam has.
+        com.apple.security.temporary-exception.mach-lookup.global-name:
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spks
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spki
     info:
       path: RCam/Info.plist
       properties:
@@ -98,18 +132,27 @@ targets:
         CFBundleDisplayName: RCam
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
-        # App Store Connect requires a category; the archive warns without one.
+        # Finder and Launchpad sort by it, and archiving warns without one.
         LSApplicationCategoryType: public.app-category.video
-        NSHumanReadableCopyright: Copyright (c) 2026 Straw Dynamics. All rights reserved.
+        NSHumanReadableCopyright: Copyright © 2026 Straw Dynamics. MIT License.
         # RCam ships no cryptography of its own: RTSP runs in the clear, and the
-        # only crypto it touches is the OS Keychain. Both are exempt, so this
-        # declaration skips the export-compliance prompt on every TestFlight
-        # build. Re-check if RTSPS/TLS is ever added.
+        # only crypto it touches is the OS Keychain. Both are exempt, and saying
+        # so up front costs nothing. Re-check if RTSPS/TLS is ever added.
         ITSAppUsesNonExemptEncryption: false
+        # Sparkle. The sandbox forbids the app replacing itself, so installs go
+        # through Sparkle's Installer.xpc (see the mach-lookup entitlement).
+        # Checks run on Sparkle's schedule with no first-launch permission
+        # prompt, but an update is never installed without the user's say-so.
+        SUFeedURL: $(RCAM_SPARKLE_FEED_URL)
+        SUPublicEDKey: vlWYmhVx9CyFwFKP2T6Nl1DkrxE9AWrUtkxPbLP8L18=
+        SUEnableInstallerLauncherService: true
+        SUEnableAutomaticChecks: true
+        SUAutomaticallyUpdate: false
     dependencies:
       - target: RCamExtension
         embed: true
         codeSign: true
+      - package: Sparkle
 
   RCamExtension:
     type: system-extension
@@ -117,8 +160,11 @@ targets:
     sources: [RCamExtension]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam.extension
-        PRODUCT_NAME: com.strawdynamics.rcam.extension
+        PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam.extension
+        # Must equal the bundle ID.
+        PRODUCT_NAME: $(PRODUCT_BUNDLE_IDENTIFIER)
+        # See the RCam target's PROVISIONING_PROFILE_SPECIFIER.
+        PROVISIONING_PROFILE_SPECIFIER: $(RCAM_EXTENSION_PROFILE_SPECIFIER)
         # Deliberately NOT the app's epoch stamp. This version only changes when
         # the extension's own inputs change (see scripts/build.sh); re-activating
         # at an unchanged version is a no-op, which is what keeps the running
@@ -132,7 +178,7 @@ targets:
         # must descend from an app group in the extension's entitlements
         # (verified against sysextd log + OBS's shipping extension).
         com.apple.security.application-groups:
-          - TK7EDP5B95.com.strawdynamics.rcam
+          - $(TeamIdentifierPrefix)$(RCAM_BUNDLE_ID_PREFIX).rcam
     info:
       path: RCamExtension/Info.plist
       properties:
@@ -140,8 +186,8 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleName: RCam
-        # App Store Connect rejects a system extension without this key
-        # (error 90940), even though CFBundleName is already set.
+        # Matches the app's name wherever macOS lists the extension. (App Store
+        # Connect also insisted on it -- error 90940 -- despite CFBundleName.)
         CFBundleDisplayName: RCam
         NSSystemExtensionUsageDescription: RCam provides a virtual camera device.
         CMIOExtension:
@@ -157,7 +203,7 @@ targets:
     settings:
       groups: [ffmpeg]
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam.cli
+        PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam.cli
         # A bare tool has no bundle to embed FFmpeg in, so it reads the dylibs
         # straight out of the vendor directory. Dev-only, and never shipped.
         LD_RUNPATH_SEARCH_PATHS: "$(SRCROOT)/vendor/ffmpeg/lib"
@@ -178,10 +224,11 @@ targets:
       - RCamKit/H264Bitstream.swift
       - RCamKit/StreamHealth.swift
       - RCam/CameraPresets.swift
-      - RCam/Watermark.swift
+      - RCam/InstallLocation.swift
+      - RCam/ScheduledUpdateGate.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.strawdynamics.rcam.tests
+        PRODUCT_BUNDLE_IDENTIFIER: $(RCAM_BUNDLE_ID_PREFIX).rcam.tests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:

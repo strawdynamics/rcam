@@ -22,10 +22,11 @@ import os.log
 /// **Threading contract.** Two disciplines, deliberately:
 ///
 /// - *Main-thread only*: `unwatchedSince`, `backoffSeconds`,
-///   `nextReconnectAllowed`, `asleep`, `statusText`, `streamingCameraID` and
-///   `lastPollDiagnostic`. They are touched by the poll timer, by `select`,
-///   and by the `onStateChange` handler in `makeSource`, all of which run on
-///   main — the handler hops there explicitly before doing anything.
+///   `nextReconnectAllowed`, `asleep`, `statusText`, `streamingCameraID`,
+///   `cameraInUse` and `lastPollDiagnostic`. They are touched by the poll
+///   timer, by `select`, and by the `onStateChange` handler in `makeSource`,
+///   all of which run on main — the handler hops there explicitly before
+///   doing anything.
 /// - *Guarded by `switchLock`*: `activeSource` and `pendingSource`, the only
 ///   two members the decode thread also reaches. Every read and write of them
 ///   takes the lock, including the identity checks in `onFrame`.
@@ -37,17 +38,24 @@ import os.log
 /// anything published.
 final class RCamController: ObservableObject {
     static let unwatchedGrace: TimeInterval = 10
+    // Literal on purpose: rcamcli posts it (and setLaunchAtLogin below) under
+    // its own bundle ID, so neither side can derive the other's. It is only a
+    // namespaced name for a debug hook, not a signing identity.
     static let selectNotification = Notification.Name("com.strawdynamics.rcam.selectCamera")
 
     @Published var statusText = "Starting…"
     /// The camera currently delivering frames to the virtual device, if any.
     @Published private(set) var streamingCameraID: UUID?
+    /// Whether a client has the virtual camera open, as of the last poll: the
+    /// extension's `watched` flag, without the disconnect grace. The updater
+    /// holds scheduled update prompts back while this is true.
+    @Published private(set) var cameraInUse = false
 
     let config = ConfigStore()
-    /// Purchase state. Owned here because the frame path below is the one
-    /// place that consumes it per frame; Settings observes it for the UI.
-    let store = Store()
 
+    // Every subsystem stays literal, whatever the bundle ID prefix: the
+    // documented `log show --predicate 'subsystem BEGINSWITH ...'` commands
+    // depend on it, and RCamKit's logger is shared with rcamcli.
     private let log = Logger(subsystem: "com.strawdynamics.rcam", category: "Controller")
     private let sinkWriter = SinkWriter()
     private let switchLock = NSLock()
@@ -64,8 +72,6 @@ final class RCamController: ObservableObject {
     private var asleep = false
 
     func start() {
-        store.start()
-
         // Without camera authorization the DAL hides camera devices from this
         // process — the poll would never find our own virtual camera.
         AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
@@ -189,11 +195,13 @@ final class RCamController: ObservableObject {
     private func poll() {
         guard let device = CMIOHelpers.findDevice(uid: SinkWriter.deviceUID) else {
             statusText = "Virtual camera not installed"
+            if cameraInUse { cameraInUse = false }
             diagnose("device not found; visible UIDs: \(CMIOHelpers.allDeviceUIDs())")
             return
         }
         let watched = CMIOHelpers.readCustomString(device: device, code: "rwch") == "1"
         diagnose("device \(device), watched=\(watched)")
+        if cameraInUse != watched { cameraInUse = watched }
 
         switchLock.lock()
         let hasSource = activeSource != nil || pendingSource != nil
@@ -314,11 +322,6 @@ final class RCamController: ObservableObject {
                 self.completeSwitch(from: source)
             }
             if isActive || isPendingNow {
-                // In place, before the sink wraps the buffer: at this point
-                // only the decode thread holds it (see Watermark).
-                if self.store.shouldWatermark {
-                    Watermark.shared.apply(to: pixelBuffer)
-                }
                 self.sinkWriter.enqueue(pixelBuffer)
             }
         }

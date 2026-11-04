@@ -10,12 +10,11 @@
 # agree by the compiler. Run from the repo root.
 set -euo pipefail
 
-# The FFmpeg version is stated in three places: FFMPEG_VERSION in
-# build-ffmpeg.sh, the string the acknowledgements panel shows the user, and the
-# published build recipe. Bump one and the other two keep asserting the old
+# The FFmpeg version is stated in two places: FFMPEG_VERSION in build-ffmpeg.sh
+# (which the acknowledgements panel links as the build recipe) and the string
+# the panel shows the user. Bump one and the other keeps asserting the old
 # version -- in a legal notice, where a wrong answer is indistinguishable from a
-# right one. The gist is a manual step, but the in-app copy can be held to the
-# script.
+# right one.
 RECIPE_FFMPEG_VERSION="$(sed -n 's/^FFMPEG_VERSION="\(.*\)"$/\1/p' scripts/build-ffmpeg.sh)"
 APP_FFMPEG_VERSION="$(sed -n 's/.*static let ffmpegVersion = "\(.*\)".*/\1/p' RCam/Acknowledgements.swift)"
 if [[ -z "$RECIPE_FFMPEG_VERSION" || -z "$APP_FFMPEG_VERSION" ]]; then
@@ -24,7 +23,7 @@ if [[ -z "$RECIPE_FFMPEG_VERSION" || -z "$APP_FFMPEG_VERSION" ]]; then
 fi
 if [[ "$RECIPE_FFMPEG_VERSION" != "$APP_FFMPEG_VERSION" ]]; then
   echo "error: Acknowledgements.swift says FFmpeg $APP_FFMPEG_VERSION, build-ffmpeg.sh builds $RECIPE_FFMPEG_VERSION" >&2
-  echo "       Update RCam/Acknowledgements.swift, and re-publish the build recipe gist it links." >&2
+  echo "       Update ffmpegVersion in RCam/Acknowledgements.swift to match." >&2
   exit 1
 fi
 
@@ -48,9 +47,9 @@ if [[ "$VENDORED_DYLIBS" != "$EMBEDDED_DYLIBS" ]]; then
   exit 1
 fi
 
-# Every embedded dylib needs a dSYM beside it whose UUID matches, or App Store
-# Connect refuses the symbol upload for that library and its frames stay
-# unsymbolicated in every crash report. Checked here rather than only in
+# Every embedded dylib needs a dSYM beside it whose UUID matches, or its
+# frames stay unsymbolicated in every crash report and the release's dSYMs
+# zip is missing that library. Checked here rather than only in
 # build-ffmpeg.sh because the dylibs are committed: a clone can have the
 # libraries without ever running the recipe that produces the symbols.
 for dylib in vendor/ffmpeg/lib/lib*.[0-9]*.dylib; do

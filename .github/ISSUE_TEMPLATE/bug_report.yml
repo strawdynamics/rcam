@@ -1,0 +1,83 @@
+name: Bug report
+description: Something in RCam doesn't work the way it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Please don't paste camera passwords anywhere in this form. Issues are public.
+        For a security problem, use the private report linked from the new-issue page instead.
+  - type: input
+    id: rcam-version
+    attributes:
+      label: RCam version
+      description: Settings › General › Version. The Copy button copies both numbers.
+      placeholder: 1.0.2 (1790000000)
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      description: Apple menu › About This Mac, or `sw_vers` in Terminal.
+      placeholder: macOS 15.6 (24G84)
+    validations:
+      required: true
+  - type: input
+    id: mac-model
+    attributes:
+      label: Mac model
+      placeholder: MacBook Pro (14-inch, M3 Pro, 2023)
+    validations:
+      required: true
+  - type: input
+    id: camera
+    attributes:
+      label: Camera brand and model
+      description: Include the firmware version if you know it. Write "n/a" if this isn't about a specific camera.
+      placeholder: Reolink RLC-810A, firmware v3.1.0
+    validations:
+      required: true
+  - type: input
+    id: stream-url
+    attributes:
+      label: Stream URL, with credentials removed
+      description: |
+        Remove the username and password, and replace the IP address if you like. The path and port matter most.
+        For example, `rtsp://user:pass@192.168.1.20:554/h264Preview_01_main` becomes `rtsp://192.168.1.x:554/h264Preview_01_main`.
+      placeholder: rtsp://192.168.1.x:554/stream1
+  - type: input
+    id: client-app
+    attributes:
+      label: App using the camera
+      description: Where you're watching RCam's camera, if that's relevant.
+      placeholder: Zoom 6.4, Photo Booth, QuickTime…
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add a camera with …
+        2. Open Photo Booth and pick the RCam camera
+        3. …
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Reproduce the problem, then run this in Terminal within 30 minutes and paste the output (or attach `rcam.log`).
+        Type the full `/usr/bin/log` path: in zsh, a bare `log` is a shell builtin and prints nothing useful.
+
+        ```sh
+        /usr/bin/log show --predicate 'subsystem BEGINSWITH "com.strawdynamics.rcam"' --last 30m --info > ~/Desktop/rcam.log
+        ```
+
+        RCam doesn't log camera passwords. It logs camera hosts and paths, so check the output for anything you'd rather not share.
+      render: text

@@ -1,0 +1,24 @@
+// Signing identity for every target. project.yml points both configurations
+// here, so this is the one file a contributor needs to override -- and they
+// should do that in Configs/Local.xcconfig (gitignored), not by editing this.
+//
+// Local.xcconfig, for building under your own paid team:
+//
+//   DEVELOPMENT_TEAM = <your team ID>
+//   RCAM_BUNDLE_ID_PREFIX = com.example
+//
+// Every bundle ID is derived from RCAM_BUNDLE_ID_PREFIX, and the extension's
+// app group from the team prefix plus it, so the two lines above are enough to
+// give the app, the extension and its CMIO mach service a consistent identity
+// that your team can provision.
+
+DEVELOPMENT_TEAM = TK7EDP5B95
+RCAM_BUNDLE_ID_PREFIX = com.strawdynamics
+
+// Written by scripts/build.sh and scripts/release.sh (CFBundleVersion stamps),
+// and gitignored. Optional so a bare `xcodegen generate && xcodebuild` (CI, a
+// fresh clone) still builds, just with an empty build number.
+#include? "Version.xcconfig"
+
+// Last, so it overrides everything above.
+#include? "Local.xcconfig"

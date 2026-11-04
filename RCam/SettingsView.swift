@@ -8,6 +8,7 @@ struct SettingsView: View {
     @ObservedObject var config: ConfigStore
     let controller: RCamController
     @ObservedObject var extensionManager: ExtensionManager
+    let updater: Updater
 
     var body: some View {
         // The card lives inside each pane rather than wrapped around the
@@ -18,7 +19,7 @@ struct SettingsView: View {
             CamerasPane(config: config, controller: controller)
                 .tabItem { Label("Cameras", systemImage: "video") }
             GeneralPane(config: config, controller: controller,
-                        extensionManager: extensionManager, store: controller.store)
+                        extensionManager: extensionManager, updater: updater)
                 .tabItem { Label("General", systemImage: "gearshape") }
         }
         .frame(minWidth: 640, minHeight: 440)
@@ -66,7 +67,7 @@ struct GeneralPane: View {
     @ObservedObject var config: ConfigStore
     let controller: RCamController
     @ObservedObject var extensionManager: ExtensionManager
-    @ObservedObject var store: Store
+    @ObservedObject var updater: Updater
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var showAcknowledgements = false
     @State private var confirmRemoveExtension = false
@@ -78,32 +79,11 @@ struct GeneralPane: View {
         return "\(short) (\(build))"
     }
 
-    /// The App Store's write-a-review page for RCam. The number is the app's
-    /// Apple ID from App Store Connect; `action=write-review` opens straight
-    /// into the review sheet instead of the product page.
-    static let writeReviewURL = URL(string: "https://apps.apple.com/app/id6804344210?action=write-review")!
-
-    /// A prefilled support email. The body carries what a bug report always
-    /// gets asked for -- build, macOS version, extension state -- all of it
-    /// already on screen in this pane, so nothing here is news to the user.
-    private var supportMailURL: URL {
-        let body = """
-
-
-            --
-            RCam \(Self.versionString)
-            macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
-            Extension: \(extensionManager.status)
-            """
-        var components = URLComponents()
-        components.scheme = "mailto"
-        components.path = "rcam@paulstraw.com"
-        components.queryItems = [
-            URLQueryItem(name: "subject", value: "RCam support"),
-            URLQueryItem(name: "body", value: body),
-        ]
-        return components.url!
-    }
+    static let websiteURL = URL(string: "https://rcam.strawdynamics.com")!
+    static let repositoryURL = URL(string: "https://github.com/strawdynamics/rcam")!
+    /// The template chooser rather than a blank issue: the bug template asks
+    /// for the build, macOS version and logs a report always ends up needing.
+    static let newIssueURL = URL(string: "https://github.com/strawdynamics/rcam/issues/new/choose")!
 
     var body: some View {
         VStack(spacing: 0) {
@@ -116,8 +96,6 @@ struct GeneralPane: View {
 
     private var generalForm: some View {
         Form {
-            PurchaseSection(store: store)
-
             Section {
                 Toggle(isOn: $launchAtLogin) {
                     Text("Launch RCam at login")
@@ -127,6 +105,16 @@ struct GeneralPane: View {
                     if !controller.setLaunchAtLogin(newValue) {
                         launchAtLogin = SMAppService.mainApp.status == .enabled
                     }
+                }
+
+                // Bound straight through to Sparkle, which persists the choice
+                // itself. Off still leaves "Check for Updates…" in the menu.
+                Toggle(isOn: Binding(
+                    get: { updater.automaticallyChecksForUpdates },
+                    set: { updater.setAutomaticallyChecksForUpdates($0) }
+                )) {
+                    Text("Automatically check for updates")
+                    Text("RCam always asks before installing an update.")
                 }
 
                 LabeledContent {
@@ -178,24 +166,27 @@ struct GeneralPane: View {
                     Text("FFmpeg \(Acknowledgements.ffmpegVersion), under the LGPL.")
                 }
 
-                // Shown to free and unlocked users alike: the support link is
-                // most useful to exactly the people the watermark annoys.
                 LabeledContent {
                     HStack(spacing: 12) {
-                        Button("Review") {
-                            NSWorkspace.shared.open(Self.writeReviewURL)
+                        Button("Website") {
+                            NSWorkspace.shared.open(Self.websiteURL)
                         }
                         .buttonStyle(.link)
                         .font(.caption)
-                        Button("Contact support") {
-                            NSWorkspace.shared.open(supportMailURL)
+                        Button("GitHub") {
+                            NSWorkspace.shared.open(Self.repositoryURL)
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        Button("Report an Issue") {
+                            NSWorkspace.shared.open(Self.newIssueURL)
                         }
                         .buttonStyle(.link)
                         .font(.caption)
                     }
                 } label: {
-                    Text("Enjoying RCam?")
-                    Text("Reviews help other people find RCam.")
+                    Text("Help & feedback")
+                    Text("RCam is free and open source under the MIT License.")
                 }
             }
 
@@ -242,90 +233,6 @@ struct GeneralPane: View {
                  You can install it again from this window at any time.
                  """)
         }
-    }
-}
-
-/// The buy / restore row, or the thank-you once it has happened.
-///
-/// Sits at the top of General on purpose: it is the one screenshot App Review
-/// asks for against the in-app purchase, and it is the first thing a free user
-/// wondering about the watermark should find. There is deliberately no menu
-/// bar item -- the watermark is already doing the asking.
-struct PurchaseSection: View {
-    @ObservedObject var store: Store
-
-    var body: some View {
-        Section {
-            if store.isUnlocked {
-                LabeledContent {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.green)
-                        .imageScale(.large)
-                } label: {
-                    Text("RCam is unlocked")
-                    if store.forceLockedActive {
-                        Text("Debug override: forceLocked is set, so the watermark stays on.")
-                    } else {
-                        Text("Thank you for supporting RCam.")
-                    }
-                }
-            } else {
-                LabeledContent {
-                    HStack(spacing: 12) {
-                        Button("Restore Purchases") {
-                            Task { await store.restore() }
-                        }
-                        .buttonStyle(.link)
-                        .font(.caption)
-                        .disabled(busy)
-
-                        switch store.productState {
-                        case .loading:
-                            ProgressView().controlSize(.small)
-                        case .failed:
-                            Button("Retry") {
-                                Task { await store.loadProduct() }
-                            }
-                        case .loaded(let product):
-                            Button("Unlock for \(product.displayPrice)") {
-                                Task { await store.purchase() }
-                            }
-                            .disabled(busy)
-                        }
-                    }
-                } label: {
-                    Text("Free version")
-                    Text(detail)
-                }
-            }
-        } footer: {
-            if !store.isUnlocked {
-                Text("The free version adds a small watermark to the video. A one-time purchase removes it on every Mac signed in to your Apple Account.")
-            }
-        }
-    }
-
-    private var busy: Bool {
-        store.purchaseState == .inProgress
-    }
-
-    /// One line under the title. Purchase problems outrank product-load
-    /// problems: the user just did something and deserves the answer to that.
-    private var detail: String {
-        switch store.purchaseState {
-        case .inProgress:
-            return "Contacting the App Store…"
-        case .pending:
-            return "Purchase pending approval. RCam unlocks when it is approved."
-        case .failed(let message):
-            return message
-        case .idle:
-            break
-        }
-        if case .failed = store.productState {
-            return "Couldn't reach the App Store. Check your connection and retry."
-        }
-        return "Video from RCam carries a watermark."
     }
 }
 
