@@ -4,6 +4,17 @@ A macOS menu bar app that turns RTSP camera streams (security cams, IP cams) int
 
 RCam is free and open source under the [MIT License](LICENSE). Website: <https://rcam.strawdynamics.com>
 
+![RCam's Settings window, testing a camera's main and substream with live previews](docs/screenshots/settings-preview.png)
+
+<img src="docs/screenshots/menu.png" height="320" alt="RCam's menu bar menu: pick a camera, see what's streaming">
+
+<details>
+<summary>More screenshots</summary>
+
+![Editing a camera: name, RTSP main and substream URLs, which stream to use, and aspect handling](docs/screenshots/settings-camera.png)
+
+</details>
+
 ## Install
 
 1. Download the latest `RCam-<version>.dmg` from [Releases](https://github.com/strawdynamics/rcam/releases/latest).
