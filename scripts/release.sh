@@ -128,7 +128,9 @@ if [[ -f "$VERSION_FILE" ]]; then
   RESTORE="$(mktemp)"
   cp "$VERSION_FILE" "$RESTORE"
 fi
-cleanup() { [[ -n "$RESTORE" ]] && cp "$RESTORE" "$VERSION_FILE" && rm -f "$RESTORE"; }
+# An if, not &&: a false test as the EXIT trap's last command would become the
+# script's exit status, failing every run that started with no $VERSION_FILE.
+cleanup() { if [[ -n "$RESTORE" ]]; then cp "$RESTORE" "$VERSION_FILE" && rm -f "$RESTORE"; fi; }
 trap cleanup EXIT
 
 # One stamp for both bundles. Epoch seconds is monotonic, which is what Sparkle
